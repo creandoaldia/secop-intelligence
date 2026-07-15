@@ -4,6 +4,9 @@ import { db } from "@/lib/db";
 import { alertas } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { rateLimitMiddleware } from "@/lib/security/rate-limit";
+import { validateCsrf, csrfErrorResponse } from "@/lib/security/csrf";
+import { logAudit } from "@/lib/audit/logger";
 
 const createAlertaSchema = z.object({
   nombre: z.string().min(1, "El nombre es requerido"),
@@ -19,6 +22,15 @@ export async function GET() {
   const session = await auth();
   if (!session?.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Rate limit: 30 requests/min per user for alertas
+  const rl = rateLimitMiddleware(`alertas-list:${session.user.id}`, { maxRequests: 30, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Demasiadas solicitudes" },
+      { status: 429, headers: { "Retry-After": String(Math.ceil((rl.resetAt - Date.now()) / 1000)) } }
+    );
+  }
 
   try {
     const data = await db
@@ -41,6 +53,19 @@ export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Rate limit: 20 alertas created/hour per user
+  const rl = rateLimitMiddleware(`alertas-create:${session.user.id}`, { maxRequests: 20, windowMs: 3600_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Demasiadas alertas creadas. Intenta mas tarde." },
+      { status: 429 }
+    );
+  }
+
+  // CSRF check for mutating requests
+  const csrf = validateCsrf(request);
+  if (!csrf.valid) return csrfErrorResponse();
 
   try {
     const body = await request.json();
@@ -70,6 +95,15 @@ export async function POST(request: NextRequest) {
       })
       .returning()
       .get();
+
+    // Audit log
+    await logAudit({
+      action: "alerta.create",
+      userId: session.user.id,
+      entity: "alerta",
+      entityId: String(result.id),
+      metadata: JSON.stringify({ nombre: parsed.data.nombre }),
+    });
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

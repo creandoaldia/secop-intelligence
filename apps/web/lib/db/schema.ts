@@ -243,6 +243,19 @@ export const feedback = sqliteTable("feedback", {
     .default(sql`(strftime('%s','now'))`),
 });
 
+// ─── AUDIT LOG ──────────────────────────────────────────────
+
+export const activityLog = sqliteTable("activity_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  action: text("action").notNull(),           // "login", "register", "alerta.create", "alerta.delete", etc
+  userId: text("user_id"),
+  entity: text("entity").notNull(),            // "user", "alerta", "proceso", etc
+  entityId: text("entity_id"),
+  metadata: text("metadata"),                  // JSON with extra context
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .default(sql`(strftime('%s','now'))`),
+});
+
 // ─── FTS5 VIRTUAL TABLES ────────────────────────────────────
 
 // Indices recomendados (crear en migration aparte):

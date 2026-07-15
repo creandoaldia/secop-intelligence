@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { hash } from "bcryptjs";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { rateLimitMiddleware } from "@/lib/security/rate-limit";
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -13,21 +14,6 @@ const registerSchema = z.object({
 
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-const rateMap = new Map<string, { count: number; resetAt: number }>();
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const entry = rateMap.get(ip);
-  if (!entry || now > entry.resetAt) {
-    rateMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return true;
-  }
-  if (entry.count >= RATE_LIMIT_MAX) {
-    return false;
-  }
-  entry.count++;
-  return true;
-}
 
 export async function POST(req: Request) {
   const ip =
@@ -35,7 +21,8 @@ export async function POST(req: Request) {
     req.headers.get("x-real-ip") ||
     "unknown";
 
-  if (!checkRateLimit(ip)) {
+  const rl = rateLimitMiddleware(`register:${ip}`, { maxRequests: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
+  if (!rl.allowed) {
     return NextResponse.json(
       { error: "Demasiados intentos. Intenta en una hora." },
       { status: 429 }

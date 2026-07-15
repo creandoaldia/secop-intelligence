@@ -4,6 +4,9 @@ import { db } from "@/lib/db";
 import { alertas } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
+import { validateCsrf, csrfErrorResponse } from "@/lib/security/csrf";
+import { rateLimitMiddleware } from "@/lib/security/rate-limit";
+import { logAudit } from "@/lib/audit/logger";
 
 const updateAlertaSchema = z.object({
   nombre: z.string().min(1).optional(),
@@ -56,6 +59,14 @@ export async function PATCH(
   if (!session?.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // Rate limit + CSRF
+  const rl = rateLimitMiddleware(`alertas-update:${session.user.id}`, { maxRequests: 30, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json({ error: "Demasiadas solicitudes" }, { status: 429 });
+  }
+  const csrf = validateCsrf(request);
+  if (!csrf.valid) return csrfErrorResponse();
+
   try {
     const existing = await db
       .select()
@@ -91,14 +102,27 @@ export async function PATCH(
     if (parsed.data.activa !== undefined) updateData.activa = parsed.data.activa;
     if (parsed.data.frecuencia !== undefined) updateData.frecuencia = parsed.data.frecuencia;
 
-    const result = await db
+    // Defense-in-depth: include userId in WHERE
+    await db
       .update(alertas)
       .set(updateData)
+      .where(and(eq(alertas.id, parseInt(params.id)), eq(alertas.userId, session.user.id)))
+      .run();
+
+    await logAudit({
+      action: "alerta.update",
+      userId: session.user.id,
+      entity: "alerta",
+      entityId: params.id,
+    });
+
+    const updated = await db
+      .select()
+      .from(alertas)
       .where(eq(alertas.id, parseInt(params.id)))
-      .returning()
       .get();
 
-    return NextResponse.json(result);
+    return NextResponse.json(updated);
   } catch (error) {
     console.error("Error updating alerta:", error);
     return NextResponse.json(
@@ -109,12 +133,20 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth();
   if (!session?.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Rate limit + CSRF
+  const rl = rateLimitMiddleware(`alertas-delete:${session.user.id}`, { maxRequests: 20, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json({ error: "Demasiadas solicitudes" }, { status: 429 });
+  }
+  const csrf = validateCsrf(request);
+  if (!csrf.valid) return csrfErrorResponse();
 
   try {
     const existing = await db
@@ -132,8 +164,15 @@ export async function DELETE(
 
     await db
       .delete(alertas)
-      .where(eq(alertas.id, parseInt(params.id)))
+      .where(and(eq(alertas.id, parseInt(params.id)), eq(alertas.userId, session.user.id)))
       .run();
+
+    await logAudit({
+      action: "alerta.delete",
+      userId: session.user.id,
+      entity: "alerta",
+      entityId: params.id,
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

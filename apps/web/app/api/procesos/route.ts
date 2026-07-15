@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { procesos } from "@/lib/db/schema";
+import { rateLimitMiddleware } from "@/lib/security/rate-limit";
 import {
   like,
   and,
@@ -35,6 +36,16 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Rate limit: 100 requests/min per user
+  const rl = rateLimitMiddleware(`procesos:${session.user.id}`);
+  if (!rl.allowed) {
+    const retryAfter = Math.ceil((rl.resetAt - Date.now()) / 1000);
+    return NextResponse.json(
+      { error: "Demasiadas solicitudes", retryAfter },
+      { status: 429, headers: { "Retry-After": String(retryAfter) } }
+    );
+  }
 
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("search") || "";
