@@ -3,9 +3,14 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { senaProfiles } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import { z } from "zod";
 import { validateCsrf, csrfErrorResponse } from "@/lib/security/csrf";
 import { rateLimitMiddleware } from "@/lib/security/rate-limit";
 import { logAudit } from "@/lib/audit/logger";
+
+const deleteParamsSchema = z.object({
+  id: z.coerce.number().int().positive("ID de perfil invalido"),
+});
 
 export async function DELETE(
   request: NextRequest,
@@ -22,11 +27,21 @@ export async function DELETE(
   const csrf = validateCsrf(request);
   if (!csrf.valid) return csrfErrorResponse();
 
+  const parsedParams = deleteParamsSchema.safeParse(params);
+  if (!parsedParams.success) {
+    return NextResponse.json(
+      { error: "ID invalido", details: parsedParams.error.flatten() },
+      { status: 400 }
+    );
+  }
+
+  const profileId = parsedParams.data.id;
+
   try {
     const existing = await db
       .select()
       .from(senaProfiles)
-      .where(and(eq(senaProfiles.id, parseInt(params.id)), eq(senaProfiles.userId, session.user.id)))
+      .where(and(eq(senaProfiles.id, profileId), eq(senaProfiles.userId, session.user.id)))
       .get();
 
     if (!existing) {
@@ -38,7 +53,7 @@ export async function DELETE(
 
     await db
       .delete(senaProfiles)
-      .where(and(eq(senaProfiles.id, parseInt(params.id)), eq(senaProfiles.userId, session.user.id)))
+      .where(and(eq(senaProfiles.id, profileId), eq(senaProfiles.userId, session.user.id)))
       .run();
 
     await logAudit({

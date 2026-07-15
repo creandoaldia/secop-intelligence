@@ -11,6 +11,13 @@ import { analyzeDocumentFromUrl } from "@/lib/ocr/client";
 import { extractFromDocument } from "@/lib/llm/extractor";
 import { verifyExtraction } from "@/lib/llm/verifier";
 import { logAudit } from "@/lib/audit/logger";
+import {
+  ANALYSIS_POLL_INTERVAL_MS,
+  ANALYSIS_MAX_RETRIES,
+  ANALYSIS_JOB_TIMEOUT_MS,
+  ANALYSIS_OCR_TIMEOUT_MS,
+  ANALYSIS_MAX_TOKENS_OCR,
+} from "@/lib/constants";
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -33,9 +40,6 @@ export interface VerificationResult {
 // ─── Worker State ──────────────────────────────────────────
 
 let workerInterval: ReturnType<typeof setInterval> | null = null;
-const POLL_INTERVAL_MS = 10_000; // 10 seconds
-const JOB_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes max per job
-const MAX_RETRIES = 3;
 
 // ─── Status Updates ────────────────────────────────────────
 
@@ -160,7 +164,7 @@ async function processJob(jobId: string): Promise<void> {
     // Check retry count
     const retryCount = job.error ? parseInt(job.error.split("|")[0] ?? "0", 10) : 0;
 
-    if (retryCount < MAX_RETRIES - 1) {
+    if (retryCount < ANALYSIS_MAX_RETRIES - 1) {
       // Retry: reset to pending with incremented retry counter
       await db.update(analysisJobs).set({
         estado: "pending",
@@ -168,7 +172,7 @@ async function processJob(jobId: string): Promise<void> {
       }).where(eq(analysisJobs.id, jobId)).run();
     } else {
       await updateJobStatus(jobId, "failed", {
-        error: `Máximos reintentos (${MAX_RETRIES}) alcanzados: ${msg}`,
+        error: `Máximos reintentos (${ANALYSIS_MAX_RETRIES}) alcanzados: ${msg}`,
       });
     }
   }
@@ -177,7 +181,7 @@ async function processJob(jobId: string): Promise<void> {
 // ─── Polling Loop ──────────────────────────────────────────
 
 async function pollPendingJobs(): Promise<void> {
-  const staleThreshold = new Date(Date.now() - JOB_TIMEOUT_MS);
+  const staleThreshold = new Date(Date.now() - ANALYSIS_JOB_TIMEOUT_MS);
 
   try {
     // Find all pending jobs, ordered by creation date (FIFO)
@@ -214,11 +218,11 @@ export function startWorker(): void {
   }
 
   isRunning = true;
-  console.log("[Analysis Worker] Started — polling every", POLL_INTERVAL_MS, "ms");
+  console.log("[Analysis Worker] Started — polling every", ANALYSIS_POLL_INTERVAL_MS, "ms");
 
   // Immediate first poll, then interval
   pollPendingJobs();
-  workerInterval = setInterval(pollPendingJobs, POLL_INTERVAL_MS);
+  workerInterval = setInterval(pollPendingJobs, ANALYSIS_POLL_INTERVAL_MS);
 }
 
 export function stopWorker(): void {
@@ -237,7 +241,7 @@ export function isWorkerRunning(): boolean {
 // ─── Cleanup stale jobs on boot ────────────────────────────
 
 export async function cleanupStaleJobs(): Promise<number> {
-  const staleThreshold = new Date(Date.now() - JOB_TIMEOUT_MS);
+  const staleThreshold = new Date(Date.now() - ANALYSIS_JOB_TIMEOUT_MS);
 
   const result = await db.update(analysisJobs)
     .set({

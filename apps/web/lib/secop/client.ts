@@ -7,8 +7,7 @@ import {
   SocrataNetworkError,
   SocrataClientConfig,
 } from "./types";
-
-const DEFAULT_TIMEOUT_MS = 30_000;
+import { SOCRATA_TIMEOUT_MS, PAGE_SIZE_SOCRATA, SOCRATA_MAX_CONCURRENCY } from "@/lib/constants";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -55,7 +54,7 @@ export class SocrataClient {
     signal?: AbortSignal
   ): Promise<SocrataProcessRow[]> {
     // Enforce max page size
-    const cappedLimit = Math.min(limit, 1000);
+    const cappedLimit = Math.min(limit, PAGE_SIZE_SOCRATA);
 
     const url = `${this.baseUrl}/${this.datasetId}.json?$limit=${cappedLimit}&$offset=${offset}&$order=:id`;
 
@@ -90,7 +89,7 @@ export class SocrataClient {
     let response: Response;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+      const timeoutId = setTimeout(() => controller.abort(), SOCRATA_TIMEOUT_MS);
 
       // Combine external signal with timeout
       if (signal) {
@@ -109,8 +108,8 @@ export class SocrataClient {
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {
         throw new SocrataTimeoutError(
-          `Request timed out after ${DEFAULT_TIMEOUT_MS}ms`,
-          DEFAULT_TIMEOUT_MS
+          `Request timed out after ${SOCRATA_TIMEOUT_MS}ms`,
+          SOCRATA_TIMEOUT_MS
         );
       }
       throw new SocrataNetworkError(

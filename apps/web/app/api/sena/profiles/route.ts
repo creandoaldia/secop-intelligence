@@ -36,10 +36,15 @@ export async function GET() {
       .where(eq(senaProfiles.userId, session.user.id))
       .all();
 
-    const parsed = data.map((p) => ({
-      ...p,
-      habilidades: JSON.parse(p.habilidades ?? "[]") as string[],
-    }));
+    const parsed = data.map((p) => {
+      let habilidades: string[] = [];
+      try {
+        habilidades = JSON.parse(p.habilidades ?? "[]") as string[];
+      } catch {
+        habilidades = [];
+      }
+      return { ...p, habilidades };
+    });
 
     return NextResponse.json({ data: parsed });
   } catch (error) {

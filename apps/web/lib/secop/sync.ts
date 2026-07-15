@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { procesos, syncLog, entidades } from "@/lib/db/schema";
-import { eq, sql, and, lt, gt, inArray } from "drizzle-orm";
+import { eq, sql, and, inArray } from "drizzle-orm";
 import { SocrataClient } from "./client";
 import {
   mapSocrataRowToProceso,
@@ -17,10 +17,12 @@ import {
   SyncConfig,
   SyncMetrics,
 } from "./types";
-
-const PAGE_SIZE = 1000;
-const STALL_THRESHOLD = 3;
-const STALE_SYNC_MINUTES = 10;
+import {
+  PAGE_SIZE_SOCRATA,
+  SYNC_STALL_THRESHOLD,
+  SYNC_STALE_TIMEOUT_MINUTES,
+  SYNC_MAX_RETRIES,
+} from "@/lib/constants";
 
 // ─── Public API ────────────────────────────────────────────
 
@@ -28,8 +30,8 @@ export async function runSync(
   client: SocrataClient,
   config: SyncConfig
 ): Promise<SyncResult> {
-  const pageSize = Math.min(config.pageSize ?? PAGE_SIZE, 1000);
-  const stallThreshold = config.stallThreshold ?? STALL_THRESHOLD;
+  const pageSize = Math.min(config.pageSize ?? PAGE_SIZE_SOCRATA, PAGE_SIZE_SOCRATA);
+  const stallThreshold = config.stallThreshold ?? SYNC_STALL_THRESHOLD;
 
   // Check if sync already running (with stale detection)
   const runningSync = await db
@@ -48,7 +50,7 @@ export async function runSync(
     const elapsed = Math.floor(
       (Date.now() / 1000) - new Date(runningSync.fechaInicio).getTime() / 1000
     );
-    if (elapsed < STALE_SYNC_MINUTES * 60) {
+    if (elapsed < SYNC_STALE_TIMEOUT_MINUTES * 60) {
       return {
         status: "already_running",
         nuevos: 0,
@@ -240,16 +242,15 @@ export async function runSync(
       // Insert new records (batch)
       if (toInsert.length > 0) {
         const mapped = toInsert.map((r) => mapSocrataRowToProceso(r));
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await db.insert(procesos).values(mapped as any).run();
+        // Type cast via Record — MappedProceso and Drizzle insert type are structurally identical
+        await db.insert(procesos).values(mapped as unknown as typeof procesos.$inferInsert[]).run();
         nuevos += toInsert.length;
       }
 
       // Update changed records (batch via individual updates)
       for (const { row, version } of toUpdate) {
         const mapped = mapSocrataRowToProceso(row, version);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const updateData: any = {
+        const updateData: Record<string, unknown> = {
           nombre: mapped.nombre,
           entidadId: mapped.entidadId,
           entidadNombre: mapped.entidadNombre,
@@ -264,13 +265,10 @@ export async function runSync(
           hashContenido: mapped.hashContenido,
           version: mapped.version,
           datosRaw: mapped.datosRaw,
-          updatedAt: new Date(),
+          updatedAt: Math.floor(Date.now() / 1000),
         };
-        await db
-          .update(procesos)
-          .set(updateData)
-          .where(eq(procesos.id, mapped.id))
-          .run();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await db.update(procesos).set(updateData as any).where(eq(procesos.id, mapped.id)).run();
         actualizados++;
       }
 

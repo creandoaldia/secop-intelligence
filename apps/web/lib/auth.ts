@@ -10,6 +10,7 @@ import { db } from "./db";
 import { users, accounts, sessions, verificationTokens } from "./db/schema";
 import { eq } from "drizzle-orm";
 import { compare } from "bcryptjs";
+import { SESSION_MAX_AGE_SECONDS, PLAN_PAGES } from "./constants";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -19,9 +20,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     sessionsTable: sessions as any,
     verificationTokensTable: verificationTokens as any,
   }) as any,
+  // NOTA: as any es necesario por conflicto entre versiones de @auth/core
+  // (next-auth v5 beta usa distinta version que @auth/drizzle-adapter)
   session: {
     strategy: "database", // SQLite sessions, no JWTs
-    maxAge: 30 * 24 * 60 * 60, // 30 days
+    maxAge: SESSION_MAX_AGE_SECONDS,
   },
   pages: {
     signIn: "/login",
@@ -117,12 +120,6 @@ export function hasPagesRemaining(
   userPlan: string,
   pagesNeeded: number = 1
 ): boolean {
-  const planLimits: Record<string, number> = {
-    free: 10,
-    basic: 600,
-    pro: 3000,
-    premium: 10000,
-  };
-  const limit = planLimits[userPlan] ?? 0;
+  const limit = PLAN_PAGES[userPlan] ?? 0;
   return (pagesUsed + pagesNeeded) <= limit;
 }
