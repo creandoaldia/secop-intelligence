@@ -47,13 +47,19 @@ export function isDbConnected(): boolean {
 
 // ─── HELPER: get DB stats ───────────────────────────────────
 
-export function getDbStats() {
-  const row = client
-    .prepare(
-      "SELECT COUNT(*) as procesos FROM procesos UNION ALL " +
-      "SELECT COUNT(*) as usuarios FROM users UNION ALL " +
-      "SELECT COUNT(*) as analisis FROM analysis_jobs"
-    )
-    .all();
-  return row;
+export interface DbStats {
+  totalProcesos: number;
+  totalUsuarios: number;
+  totalAnalisis: number;
+}
+
+export function getDbStats(): DbStats {
+  const procesos = client.prepare("SELECT COUNT(*) as count FROM procesos").get() as { count: number };
+  const usuarios = client.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
+  const analisis = client.prepare("SELECT COUNT(*) as count FROM analysis_jobs").get() as { count: number };
+  return {
+    totalProcesos: procesos.count,
+    totalUsuarios: usuarios.count,
+    totalAnalisis: analisis.count,
+  };
 }

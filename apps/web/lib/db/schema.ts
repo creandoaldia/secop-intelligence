@@ -21,8 +21,11 @@ export const users = sqliteTable("users", {
   pagesUsed: integer("pages_used").default(0).notNull(),
   pagesResetAt: integer("pages_reset_at", { mode: "timestamp" }),
   role: text("role", { enum: ["user", "admin"] }).default("user").notNull(),
-  linkedinApiKey: text("linkedin_api_key"), // encrypted
-  linkedinApiSecret: text("linkedin_api_secret"), // encrypted
+  // ATENCION: Estas claves DEBEN cifrarse con crypto.createCipheriv
+  // antes de almacenarse. El cifrado se implementa en el helper
+  // lib/linkedin/encrypt.ts (pendiente de crear en Fase 2).
+  linkedinApiKey: text("linkedin_api_key"),
+  linkedinApiSecret: text("linkedin_api_secret"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .default(sql`(strftime('%s','now'))`).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" })
@@ -76,6 +79,7 @@ export const procesos = sqliteTable("procesos", {
   departamento: text("departamento"),
   urlSecop: text("url_secop"),
   urlPliego: text("url_pliego"), // PDF del pliego
+  hashContenido: text("hash_contenido"), // SHA256 del contenido para diffing
   fuente: text("fuente", { enum: ["socrata", "ckan", "scraper"] }).default("socrata"),
   version: integer("version").default(1), // para detectar cambios (addendums)
   datosRaw: text("datos_raw"), // JSON completo de la fuente

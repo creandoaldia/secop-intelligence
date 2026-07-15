@@ -1,0 +1,31 @@
+# SECOP Intelligence Hub — Deploy Protocol
+# Proyecto: projects/secop-intelligence
+# Version: 1.0
+
+project: secop-intelligence
+vps_host: 91.99.141.173
+local_port: 3000
+
+build:
+  command: docker compose build
+  output: image secop-intelligence:latest
+
+verify:
+  - health: "http://localhost:3000/api/health"
+    expected: 200
+  - db: "SQLite connection ok"
+  - sync: "Ultimo sync < 24h"
+
+deploy:
+  method: docker-compose
+  compose_file: docker-compose.yml
+  env_file: .env
+  volumes:
+    - sqlite-data:/app/data
+  post_deploy:
+    - health_check: "http://91.99.141.173:3000/api/health"
+    - run_migrations: true
+
+rollback:
+  command: docker compose up -d --no-deps web
+  previous_image: secop-intelligence:previous

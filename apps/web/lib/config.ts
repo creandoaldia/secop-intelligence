@@ -10,10 +10,15 @@ const configSchema = z.object({
   DB_PATH: z.string().optional(),
 
   // ─── SECOP Data Sources ───────────────────────────────────
+  // NOTA: datos.gov.co es Socrata, NO CKAN.
+  // Socrata SODA API: GET /resource/{dataset-id}.json
+  // La URL de CKAN que sigue es una facade Socrata-compatible, no CKAN real.
   SECOP_API_URL: z.string().url().default(
     "https://www.datos.gov.co/resource"
   ),
-  SECOP_DATASET_ID: z.string().min(1).default(""),
+  // Requerido en produccion. Descubrir en Fase 0.1.
+  SECOP_DATASET_ID: z.string().min(1, "SECOP_DATASET_ID es requerido (ej: jbjy-vk9h)"),
+  // Socrata facade (no es CKAN real, pero compatibiliza queries)
   CKAN_API_URL: z.string().url().default(
     "https://www.datos.gov.co/api/3/action"
   ),
@@ -30,15 +35,17 @@ const configSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
 
   // ─── Auth ─────────────────────────────────────────────────
-  AUTH_SECRET: z.string().min(32).default(
-    "dev-secret-change-in-production-32chars"
-  ),
+  // REQUERIDO en produccion. En desarrollo tiene default temporal.
+  AUTH_SECRET: z.string().min(32),
 
   // ─── MercadoPago ──────────────────────────────────────────
   MP_ACCESS_TOKEN: z.string().optional(),
   MP_WEBHOOK_SECRET: z.string().optional(),
 
   // ─── LinkedIn ─────────────────────────────────────────────
+  // ATENCION: Estas claves se almacenan en DB y DEBEN cifrarse
+  // con crypto.createCipheriv antes de guardarse en linkedinApiKey/linkedinApiSecret.
+  // Ver lib/db/schema.ts — las columnas estan marcadas "encrypted".
   LINKEDIN_CLIENT_ID: z.string().optional(),
   LINKEDIN_CLIENT_SECRET: z.string().optional(),
 
@@ -57,18 +64,24 @@ const configSchema = z.object({
 export type Config = z.infer<typeof configSchema>;
 
 export function loadConfig(): Config {
-  const result = configSchema.safeParse(process.env);
+  const env = { ...process.env };
+
+  // En desarrollo, aplicar defaults para AUTH_SECRET si no esta definido
+  if (env.NODE_ENV !== "production" && !env.AUTH_SECRET) {
+    env.AUTH_SECRET = "dev-secret-change-in-production-32chars";
+  }
+
+  const result = configSchema.safeParse(env);
   if (!result.success) {
     console.error("❌ Configuracion invalida:");
     for (const issue of result.error.issues) {
       console.error(`  - ${issue.path.join(".")}: ${issue.message}`);
     }
-    // En produccion, fallar rapido
-    if (process.env.NODE_ENV === "production") {
+    // SIEMPRE fallar, nunca silenciar errores de config
+    if (env.NODE_ENV === "production") {
       process.exit(1);
     }
-    // En dev, devolver valores por defecto
-    return configSchema.parse({});
+    throw new Error("Configuracion invalida. Corrige los errores antes de continuar.");
   }
   return result.data;
 }
