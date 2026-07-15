@@ -12,12 +12,13 @@ import { eq } from "drizzle-orm";
 import { compare } from "bcryptjs";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: DrizzleAdapter(db, {
-    usersTable: users,
-    accountsTable: accounts,
-    sessionsTable: sessions,
-    verificationTokensTable: verificationTokens,
-  }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  adapter: DrizzleAdapter(db as any, {
+    usersTable: users as any,
+    accountsTable: accounts as any,
+    sessionsTable: sessions as any,
+    verificationTokensTable: verificationTokens as any,
+  }) as any,
   session: {
     strategy: "database", // SQLite sessions, no JWTs
     maxAge: 30 * 24 * 60 * 60, // 30 days
@@ -50,12 +51,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         if (!isValid) return null;
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           image: user.image,
-        };
+          plan: user.plan,
+          role: user.role,
+          pagesUsed: user.pagesUsed,
+          planExpiresAt: user.planExpiresAt,
+        } as any;
       },
     }),
   ],
@@ -79,7 +85,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           session.user.plan = dbUser.plan;
           session.user.role = dbUser.role;
           session.user.pagesUsed = dbUser.pagesUsed;
-          session.user.planExpiresAt = dbUser.planExpiresAt;
+          session.user.planExpiresAt = dbUser.planExpiresAt
+            ? Math.floor(new Date(dbUser.planExpiresAt).getTime() / 1000)
+            : undefined;
         }
       }
       return session;

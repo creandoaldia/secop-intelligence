@@ -24,6 +24,16 @@ const configSchema = z.object({
   ),
   SOCRATA_APP_TOKEN: z.string().optional(),
 
+  // ─── Socrata Sync — Anti-Blocking ─────────────────────────
+  // Delay minimo entre requests en ms. <50ms puede causar bloqueo de IP.
+  SOCRATA_REQUEST_DELAY_MS: z.coerce.number().min(50).default(200),
+  // Jitter aleatorio como fraccion del delay (0 = fijo, 0.5 = +/-50%)
+  SOCRATA_REQUEST_JITTER_PCT: z.coerce.number().min(0).max(0.5).default(0.25),
+  // Maximo Retry-After en segundos que aceptamos antes de abortar
+  SOCRATA_MAX_RETRY_AFTER_SECONDS: z.coerce.number().positive().default(300),
+  // Tipo de sync por defecto: full (todo) o incremental (solo cambios)
+  SOCRATA_SYNC_TYPE: z.enum(["full", "incremental"]).default("incremental"),
+
   // ─── Azure OCR ────────────────────────────────────────────
   AZURE_OCR_ENDPOINT: z.string().url().optional(),
   AZURE_OCR_KEY: z.string().optional(),
@@ -55,6 +65,8 @@ const configSchema = z.object({
 
   // ─── Scheduler ────────────────────────────────────────────
   SYNC_INTERVAL_HOURS: z.coerce.number().default(6),
+  // Token para autenticar llamadas a /api/cron/* (via Authorization: Bearer)
+  CRON_SECRET: z.string().optional(),
 
   // ─── App ──────────────────────────────────────────────────
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),

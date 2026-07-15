@@ -227,7 +227,8 @@ export const syncLog = sqliteTable("sync_log", {
   registrosActualizados: integer("registros_actualizados").default(0),
   errores: integer("errores").default(0),
   metricas: text("metricas"), // JSON
-  estado: text("estado", { enum: ["running", "done", "error"] }).default("running"),
+  estado: text("estado", { enum: ["running", "done", "error", "rate_limited", "stalled"] }).default("running"),
+  // Si estado="running" y fecha_inicio es >10 min sin fechaFin, tratarlo como "error" (stale detection)
 });
 
 // ─── FEEDBACK ───────────────────────────────────────────────
