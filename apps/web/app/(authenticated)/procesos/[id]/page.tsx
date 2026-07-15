@@ -1,6 +1,11 @@
 import { auth } from "@/lib/auth"
+import { canUseFeature, hasPagesRemaining } from "@/lib/auth"
 import { redirect, notFound } from "next/navigation"
+import { db } from "@/lib/db"
+import { users } from "@/lib/db/schema"
+import { eq } from "drizzle-orm"
 import { ProcesoDetail } from "@/components/procesos/proceso-detail"
+import { AnalyzeButton } from "@/components/analysis/analyze-button"
 import { ChevronLeftIcon } from "lucide-react"
 import Link from "next/link"
 
@@ -40,15 +45,39 @@ export default async function ProcesoDetailPage({ params }: PageProps) {
 
   if (!proceso && !fetchError) notFound()
 
+  const canAnalyze = canUseFeature(session.user.plan ?? "free", "analisis");
+  const user = !canAnalyze ? null : await db
+    .select({ pagesUsed: users.pagesUsed, plan: users.plan })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .get();
+  const hasPages = user ? hasPagesRemaining(user.pagesUsed, user.plan, 1) : false;
+
   return (
     <div className="space-y-6">
-      <Link
-        href="/procesos"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ChevronLeftIcon className="size-4" />
-        Volver
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link
+          href="/procesos"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronLeftIcon className="size-4" />
+          Volver
+        </Link>
+
+        {!fetchError && (
+          <AnalyzeButton
+            procesoId={params.id}
+            disabled={!canAnalyze || !hasPages}
+            disabledReason={
+              !canAnalyze
+                ? "Funcion no disponible en tu plan"
+                : !hasPages
+                ? "Has alcanzado el limite de paginas"
+                : undefined
+            }
+          />
+        )}
+      </div>
 
       {fetchError ? (
         <div className="rounded-lg border border-destructive/50 p-6 text-center text-sm text-destructive">

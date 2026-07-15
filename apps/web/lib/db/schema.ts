@@ -26,6 +26,9 @@ export const users = sqliteTable("users", {
   // lib/linkedin/encrypt.ts (pendiente de crear en Fase 2).
   linkedinApiKey: text("linkedin_api_key"),
   linkedinApiSecret: text("linkedin_api_secret"),
+  linkedinAccessToken: text("linkedin_access_token"), // encrypted AES-256-CBC
+  linkedinTokenExpiresAt: integer("linkedin_token_expires_at", { mode: "timestamp" }),
+  linkedinProfileId: text("linkedin_profile_id"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .default(sql`(strftime('%s','now'))`).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" })
@@ -252,6 +255,31 @@ export const activityLog = sqliteTable("activity_log", {
   entity: text("entity").notNull(),            // "user", "alerta", "proceso", etc
   entityId: text("entity_id"),
   metadata: text("metadata"),                  // JSON with extra context
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .default(sql`(strftime('%s','now'))`),
+});
+
+// ─── LINKEDIN POSTS ─────────────────────────────────────────
+
+export const linkedinPosts = sqliteTable("linkedin_posts", {
+  id: text("id").primaryKey(), // uuid
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  analysisJobId: text("analysis_job_id").references(() => analysisJobs.id),
+  postUrn: text("post_urn"),
+  content: text("content"),
+  status: text("status", { enum: ["draft", "posted", "failed"] }).default("draft"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .default(sql`(strftime('%s','now'))`),
+});
+
+// ─── MERCADOPAGO WEBHOOK EVENTS ─────────────────────────────
+
+export const mpWebhookEvents = sqliteTable("mp_webhook_events", {
+  id: text("id").primaryKey(), // uuid
+  eventId: text("event_id").notNull().unique(),
+  type: text("type").notNull(),
+  data: text("data"), // JSON
+  processedAt: integer("processed_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" })
     .default(sql`(strftime('%s','now'))`),
 });

@@ -8,6 +8,9 @@ import {
   FileSearch,
   CalendarCheck,
   Bell,
+  CreditCard,
+  Users,
+  Settings,
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -33,6 +36,9 @@ const navLinks = [
   { href: "/procesos", label: "Procesos", icon: FileSearch },
   { href: "/pac", label: "PAC", icon: CalendarCheck },
   { href: "/alertas", label: "Alertas", icon: Bell },
+  { href: "/planes", label: "Planes", icon: CreditCard },
+  { href: "/sena", label: "SENA", icon: Users },
+  { href: "/perfil", label: "Perfil", icon: Settings },
 ];
 
 function NavContent({ pathname }: { pathname: string }) {
