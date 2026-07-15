@@ -43,6 +43,7 @@ const configSchema = z.object({
 
   // ─── Anthropic (para JD verification) ─────────────────────
   ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_VERIFIER_MODEL: z.string().default("claude-3-haiku-20240307"),
 
   // ─── Auth ─────────────────────────────────────────────────
   // REQUERIDO en produccion. En desarrollo tiene default temporal.
@@ -71,6 +72,8 @@ const configSchema = z.object({
   // ─── App ──────────────────────────────────────────────────
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.coerce.number().default(3000),
+  // URL publica de la app (para callbacks OAuth y webhooks)
+  NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
 });
 
 export type Config = z.infer<typeof configSchema>;

@@ -7,17 +7,13 @@ import { z } from "zod";
 import { validateCsrf, csrfErrorResponse } from "@/lib/security/csrf";
 import { rateLimitMiddleware } from "@/lib/security/rate-limit";
 import { logAudit } from "@/lib/audit/logger";
+import { cancelSubscription as cancelMpSubscription } from "@/lib/mercadopago/client";
+import { PLAN_PRICING } from "@/lib/mercadopago/types";
 
 const updateSubscriptionSchema = z.object({
   action: z.enum(["cancel", "change"]),
   plan: z.enum(["basic", "pro", "premium"]).optional(),
 });
-
-const planLimits: Record<string, number> = {
-  basic: 600,
-  pro: 3000,
-  premium: 10000,
-};
 
 export async function PATCH(
   request: NextRequest,
@@ -56,6 +52,15 @@ export async function PATCH(
     }
 
     if (parsed.data.action === "cancel") {
+      // Cancel in MercadoPago first (best-effort)
+      if (existing.mpSubscriptionId) {
+        try {
+          await cancelMpSubscription(existing.mpSubscriptionId);
+        } catch (mpError) {
+          console.warn("[Subscriptions] MP cancel failed, cancelling locally:", mpError);
+        }
+      }
+
       await db
         .update(subscriptions)
         .set({ status: "cancelled" })
@@ -73,6 +78,7 @@ export async function PATCH(
         userId: session.user.id,
         entity: "subscription",
         entityId: params.id,
+        metadata: JSON.stringify({ mpSubscriptionId: existing.mpSubscriptionId }),
       });
     }
 
@@ -80,12 +86,13 @@ export async function PATCH(
       const now = new Date();
       const end = new Date(now);
       end.setMonth(end.getMonth() + 1);
+      const pricing = PLAN_PRICING[parsed.data.plan];
 
       await db
         .update(subscriptions)
         .set({
           plan: parsed.data.plan,
-          pagesAllocated: planLimits[parsed.data.plan],
+          pagesAllocated: pricing.pagesPerMonth,
           currentPeriodStart: now,
           currentPeriodEnd: end,
         })
@@ -94,7 +101,7 @@ export async function PATCH(
 
       await db
         .update(users)
-        .set({ plan: parsed.data.plan, pagesUsed: 0 })
+        .set({ plan: parsed.data.plan, pagesUsed: 0, planExpiresAt: end })
         .where(eq(users.id, session.user.id))
         .run();
 

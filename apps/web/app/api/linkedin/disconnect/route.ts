@@ -6,6 +6,8 @@ import { eq } from "drizzle-orm";
 import { validateCsrf, csrfErrorResponse } from "@/lib/security/csrf";
 import { rateLimitMiddleware } from "@/lib/security/rate-limit";
 import { logAudit } from "@/lib/audit/logger";
+import { decrypt } from "@/lib/linkedin/encrypt";
+import { revokeToken } from "@/lib/linkedin/client";
 
 export async function DELETE(request: NextRequest) {
   const session = await auth();
@@ -20,6 +22,23 @@ export async function DELETE(request: NextRequest) {
   if (!csrf.valid) return csrfErrorResponse();
 
   try {
+    // Get current user to decrypt token for revocation
+    const user = await db
+      .select({ linkedinAccessToken: users.linkedinAccessToken })
+      .from(users)
+      .where(eq(users.id, session.user.id))
+      .get();
+
+    // Revoke token at LinkedIn (best-effort, non-blocking)
+    if (user?.linkedinAccessToken) {
+      try {
+        const decrypted = decrypt(user.linkedinAccessToken);
+        await revokeToken(decrypted);
+      } catch {
+        // Revocation failure is non-blocking
+      }
+    }
+
     await db
       .update(users)
       .set({
