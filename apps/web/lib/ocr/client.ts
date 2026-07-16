@@ -167,15 +167,32 @@ export async function analyzeDocumentFromUrlAzure(url: string): Promise<OcrResul
   };
 }
 
-// ─── Smart Export: Azure first, local Tesseract fallback ────
+// ─── Smart Export: doc2md first, Azure fallback, Tesseract cold standby ────
 
+import { analyzeDocumentViaDoc2md } from "./doc2md-client";
 import { analyzeDocumentFromUrl as localOcrUrl, analyzeDocumentFromBuffer as localOcrBuffer } from "./local-client";
 
 export async function analyzeDocumentFromUrl(url: string): Promise<OcrResult> {
-  if (isAzureConfigured()) {
-    return analyzeDocumentFromUrlAzure(url);
+  // 1. Try doc2md microservice (free, local, no API keys needed)
+  try {
+    const result = await analyzeDocumentViaDoc2md(url);
+    console.log("[OCR] doc2md conversion successful");
+    return result;
+  } catch (doc2mdError) {
+    console.warn("[OCR] doc2md failed:", doc2mdError instanceof Error ? doc2mdError.message : doc2mdError);
   }
-  console.log("[OCR] Azure no configurado, usando OCR local (Tesseract)");
+
+  // 2. Fallback to Azure if configured
+  if (isAzureConfigured()) {
+    try {
+      return await analyzeDocumentFromUrlAzure(url);
+    } catch (azureError) {
+      console.warn("[OCR] Azure OCR failed:", azureError instanceof Error ? azureError.message : azureError);
+    }
+  }
+
+  // 3. Cold fallback: local Tesseract (image-only, will error for PDFs)
+  console.log("[OCR] Todos los metodos fallaron, usando Tesseract local");
   return localOcrUrl(url);
 }
 

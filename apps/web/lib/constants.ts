@@ -56,3 +56,7 @@ export const SOCRATA_TIMEOUT_MS = 30_000;
 export const AZURE_OCR_TIMEOUT_MS = 300_000;
 export const LINKEDIN_TIMEOUT_MS = 15_000;
 export const MP_TIMEOUT_MS = 30_000;
+
+// ─── doc2md Microservice ────────────────────────────────────
+export const DOC2MD_SERVICE_URL =
+  process.env.DOC2MD_SERVICE_URL ?? "http://localhost:8001";
