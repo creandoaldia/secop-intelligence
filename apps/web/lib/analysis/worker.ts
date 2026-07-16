@@ -74,16 +74,36 @@ async function processJob(jobId: string): Promise<void> {
   await updateJobStatus(jobId, "downloading");
 
   try {
-    // ── Step 1: Get proceso URL ──────────────────────────
+    // ── Step 1: Get proceso + resolve pliego URL ─────────
     const proceso = job.procesoId
       ? await db.select().from(procesos).where(eq(procesos.id, job.procesoId)).get()
       : null;
 
-    if (!proceso?.urlPliego) {
-      throw new Error("No se encontró URL de pliego para este proceso");
+    if (!proceso) {
+      throw new Error("Proceso no encontrado");
     }
 
-    const pliegoUrl = proceso.urlPliego;
+    let pliegoUrl: string | undefined = proceso.urlPliego ?? undefined;
+
+    // If no direct pliego URL, try to download from SECOP
+    if (!pliegoUrl && proceso.urlSecop) {
+      console.log(`[Analysis Worker] urlPliego vacio, descargando desde SECOP: ${proceso.id}`);
+      try {
+        const { downloadPliegoToTemp } = await import("@/lib/secop/download-client");
+        pliegoUrl = await downloadPliegoToTemp(proceso.id, proceso.urlSecop);
+        console.log(`[Analysis Worker] Pliego descargado: ${pliegoUrl}`);
+      } catch (downloadError) {
+        const msg = downloadError instanceof Error ? downloadError.message : String(downloadError);
+        throw new Error(`No se pudo descargar el pliego desde SECOP: ${msg}`);
+      }
+    }
+
+    if (!pliegoUrl) {
+      throw new Error(
+        "No se encontró URL de pliego para este proceso. " +
+        "El proceso no tiene url_pliego ni url_secop disponible."
+      );
+    }
 
     // ── Step 2: OCR ──────────────────────────────────────
     await updateJobStatus(jobId, "ocr", { progress: 10 });
