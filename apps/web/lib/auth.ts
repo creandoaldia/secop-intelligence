@@ -23,7 +23,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   // NOTA: as any es necesario por conflicto entre versiones de @auth/core
   // (next-auth v5 beta usa distinta version que @auth/drizzle-adapter)
   session: {
-    strategy: "database", // SQLite sessions, no JWTs
+    strategy: "jwt", // Credentials provider requiere JWT strategy
     maxAge: SESSION_MAX_AGE_SECONDS,
   },
   pages: {
@@ -69,29 +69,25 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   callbacks: {
-    async session({ session, user }) {
-      // Attach plan and role to session
+    async jwt({ token, user }) {
+      // Persist user data to token on sign-in
+      if (user) {
+        token.id = user.id;
+        token.plan = (user as any).plan;
+        token.role = (user as any).role;
+        token.pagesUsed = (user as any).pagesUsed;
+        token.planExpiresAt = (user as any).planExpiresAt;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      // Attach plan and role to session from JWT token
       if (session.user) {
-        session.user.id = user.id;
-        // Fetch latest plan info from DB
-        const dbUser = await db
-          .select({
-            plan: users.plan,
-            role: users.role,
-            pagesUsed: users.pagesUsed,
-            planExpiresAt: users.planExpiresAt,
-          })
-          .from(users)
-          .where(eq(users.id, user.id))
-          .get();
-        if (dbUser) {
-          session.user.plan = dbUser.plan;
-          session.user.role = dbUser.role;
-          session.user.pagesUsed = dbUser.pagesUsed;
-          session.user.planExpiresAt = dbUser.planExpiresAt
-            ? Math.floor(new Date(dbUser.planExpiresAt).getTime() / 1000)
-            : undefined;
-        }
+        session.user.id = token.id as string;
+        session.user.plan = token.plan as string;
+        session.user.role = token.role as string;
+        session.user.pagesUsed = token.pagesUsed as number;
+        session.user.planExpiresAt = token.planExpiresAt as number | undefined;
       }
       return session;
     },
