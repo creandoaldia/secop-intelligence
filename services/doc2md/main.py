@@ -213,68 +213,19 @@ async def health():
 async def _convert_local_file(file_path: str, source_name: str) -> ConvertResult:
     """Convert a local PDF file to Markdown (used by /convert-file).
 
-    This mirrors the cascade logic in converter.py but
-    skips the download step since we already have the file.
+    Delegates to converter.convert_local_file() to avoid
+    duplicating the cascade logic (DRY).
     """
     import asyncio
     from converter import (
-        _get_page_count,
-        _level1_markitdown,
-        _level2_pymupdf4llm,
-        _level3_easyocr,
-        MIN_CHARS_PER_PAGE,
-        ConvertResult,
+        convert_local_file,
         ConvertError,
         CONVERT_TIMEOUT,
     )
 
-    async def _inner() -> ConvertResult:
-        page_count = _get_page_count(file_path)
-
-        # L1
-        l1_text, l1_chars = _level1_markitdown(file_path)
-        expected_min = page_count * MIN_CHARS_PER_PAGE
-        l1_is_sparse = l1_chars < expected_min and l1_chars < 500
-
-        if l1_is_sparse:
-            l2_text, l2_chars = _level2_pymupdf4llm(file_path)
-            if l2_chars > l1_chars:
-                return ConvertResult(
-                    markdown=l2_text,
-                    engine="pymupdf4llm",
-                    fallback="triggered" if l1_chars > 0 else "scanned-redirect",
-                    pages=page_count,
-                    source=source_name,
-                )
-
-            l3_text = await _level3_easyocr(file_path)
-            l3_chars = len(l3_text.strip())
-            if l3_chars > l2_chars:
-                return ConvertResult(
-                    markdown=l3_text,
-                    engine="pdf-to-images",
-                    fallback="scanned-redirect",
-                    pages=page_count,
-                    source=source_name,
-                )
-
-            raise ConvertError(
-                "Document could not be read by any engine",
-                status_code=422,
-                detail="The document appears to be unreadable by all 3 cascade levels.",
-            )
-
-        return ConvertResult(
-            markdown=l1_text,
-            engine="markitdown",
-            fallback="not-needed",
-            pages=page_count,
-            source=source_name,
-        )
-
     try:
         return await asyncio.wait_for(
-            _inner(),
+            convert_local_file(file_path, source_name),
             timeout=CONVERT_TIMEOUT,
         )
     except asyncio.TimeoutError:

@@ -267,11 +267,10 @@ async def convert_document(
     Raises:
         ConvertError with appropriate HTTP status code.
     """
-    tmp_path = ""
-
+    tmp_path: str | None = None
     try:
         # Wrap the entire conversion in asyncio.wait_for (FIX 3)
-        result = await asyncio.wait_for(
+        result, tmp_path = await asyncio.wait_for(
             _convert_inner(url),
             timeout=timeout,
         )
@@ -301,61 +300,129 @@ async def convert_document(
                 pass
 
 
-async def _convert_inner(url: str) -> ConvertResult:
-    """Inner conversion logic (no timeout wrapper)."""
-    # Step 1: Download
-    tmp_path = await download_to_temp(url)
-    page_count = _get_page_count(tmp_path)
+async def _convert_inner(url: str) -> tuple[ConvertResult, str]:
+    """Inner conversion logic (no timeout wrapper).
 
-    # Step 2: L1 — markitdown
-    l1_text, l1_chars = _level1_markitdown(tmp_path)
+    Returns:
+        Tuple of (ConvertResult, tmp_file_path) so the caller
+        can clean up the temp file in its finally block.
 
-    # Quality gate (FIX 1): check text density vs page count
-    # If L1 returned suspiciously little text, force L2 regardless
+    Raises ConvertError on failure — temp file is returned to
+    the caller for cleanup even in error cases.
+    """
+    tmp_path = ""
+
+    try:
+        # Step 1: Download
+        tmp_path = await download_to_temp(url)
+        page_count = _get_page_count(tmp_path)
+
+        # Step 2: L1 — markitdown
+        l1_text, l1_chars = _level1_markitdown(tmp_path)
+
+        # Quality gate (FIX 1): check text density vs page count
+        expected_min = page_count * MIN_CHARS_PER_PAGE
+        l1_is_sparse = l1_chars < expected_min and l1_chars < 500
+
+        if l1_is_sparse:
+            # L1 is sparse — try L2
+            l2_text, l2_chars = _level2_pymupdf4llm(tmp_path)
+
+            if l2_chars > l1_chars:
+                return ConvertResult(
+                    markdown=l2_text,
+                    engine="pymupdf4llm",
+                    fallback="triggered" if l1_chars > 0 else "scanned-redirect",
+                    pages=page_count,
+                    source=url,
+                ), tmp_path
+
+            # L2 didn't help — try L3 (EasyOCR)
+            l3_text = await _level3_easyocr(tmp_path)
+            l3_chars = len(l3_text.strip())
+
+            if l3_chars > l2_chars:
+                return ConvertResult(
+                    markdown=l3_text,
+                    engine="pdf-to-images",
+                    fallback="scanned-redirect",
+                    pages=page_count,
+                    source=url,
+                ), tmp_path
+
+            # All levels produced nothing useful
+            raise ConvertError(
+                "Document could not be read by any engine",
+                status_code=422,
+                detail="The PDF appears to be unreadable by all 3 cascade levels "
+                "(markitdown, pymupdf4llm, EasyOCR). It may be encrypted, "
+                "corrupted, or in an unsupported format.",
+            )
+
+        # L1 looks OK — use it
+        return ConvertResult(
+            markdown=l1_text,
+            engine="markitdown",
+            fallback="not-needed",
+            pages=page_count,
+            source=url,
+        ), tmp_path
+
+    except Exception:
+        # Cleanup temp file on error before re-raising
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
+
+
+async def convert_local_file(file_path: str, source_name: str = "") -> ConvertResult:
+    """Convert a local file to Markdown (no download).
+
+    Used by /convert-file endpoint. Shares cascade logic with
+    convert_document but skips the download step.
+    """
+    page_count = _get_page_count(file_path)
+
+    # L1
+    l1_text, l1_chars = _level1_markitdown(file_path)
     expected_min = page_count * MIN_CHARS_PER_PAGE
     l1_is_sparse = l1_chars < expected_min and l1_chars < 500
 
     if l1_is_sparse:
-        # L1 is sparse — try L2
-        l2_text, l2_chars = _level2_pymupdf4llm(tmp_path)
-
+        l2_text, l2_chars = _level2_pymupdf4llm(file_path)
         if l2_chars > l1_chars:
-            # L2 is better — use it
             return ConvertResult(
                 markdown=l2_text,
                 engine="pymupdf4llm",
                 fallback="triggered" if l1_chars > 0 else "scanned-redirect",
                 pages=page_count,
-                source=url,
+                source=source_name,
             )
 
-        # L2 didn't help — try L3 (EasyOCR)
-        l3_text = await _level3_easyocr(tmp_path)
+        l3_text = await _level3_easyocr(file_path)
         l3_chars = len(l3_text.strip())
-
         if l3_chars > l2_chars:
             return ConvertResult(
                 markdown=l3_text,
                 engine="pdf-to-images",
                 fallback="scanned-redirect",
                 pages=page_count,
-                source=url,
+                source=source_name,
             )
 
-        # All levels produced nothing useful
         raise ConvertError(
             "Document could not be read by any engine",
             status_code=422,
-            detail="The PDF appears to be unreadable by all 3 cascade levels "
-            "(markitdown, pymupdf4llm, EasyOCR). It may be encrypted, "
-            "corrupted, or in an unsupported format.",
+            detail="The document appears to be unreadable by all 3 cascade levels.",
         )
 
-    # L1 looks OK — use it
     return ConvertResult(
         markdown=l1_text,
         engine="markitdown",
         fallback="not-needed",
         pages=page_count,
-        source=url,
+        source=source_name,
     )
