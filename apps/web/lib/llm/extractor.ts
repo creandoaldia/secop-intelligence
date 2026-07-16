@@ -1,21 +1,23 @@
 // ─────────────────────────────────────────────────────────────
-// SECOP Intelligence Hub — OpenAI GPT-4o-mini Extractor
-// Real implementation: extract structured data from pliego content
+// SECOP Intelligence Hub — OpenRouter-based Extractor
+// Extrae datos estructurados de pliegos usando DeepSeek V4 Flash
+// TEMPORAL: reemplazar con modelo premium cuando haya PMF
 // ─────────────────────────────────────────────────────────────
 
 import OpenAI from "openai";
 
 // ─── Config ────────────────────────────────────────────────
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const LLM_MODEL = process.env.LLM_MODEL || "deepseek/deepseek-v4-flash";
 
 function isConfigured(): boolean {
-  return !!OPENAI_API_KEY;
+  return !!OPENROUTER_API_KEY;
 }
 
 function notConfiguredError(): never {
   throw new Error(
-    "OpenAI no configurado. Define OPENAI_API_KEY en .env"
+    "OpenRouter no configurado. Define OPENROUTER_API_KEY en .env"
   );
 }
 
@@ -38,7 +40,10 @@ let _openai: OpenAI | null = null;
 function getClient(): OpenAI {
   if (!isConfigured()) notConfiguredError();
   if (!_openai) {
-    _openai = new OpenAI({ apiKey: OPENAI_API_KEY! });
+    _openai = new OpenAI({
+      apiKey: OPENROUTER_API_KEY!,
+      baseURL: "https://openrouter.ai/api/v1",
+    });
   }
   return _openai;
 }
@@ -93,7 +98,7 @@ export async function extractFromDocument(
   const openai = getClient();
 
   const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: LLM_MODEL,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       {
@@ -107,7 +112,7 @@ export async function extractFromDocument(
   });
 
   const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error("OpenAI devolvio respuesta vacia");
+  if (!content) throw new Error("LLM devolvio respuesta vacia");
 
   try {
     const parsed = JSON.parse(content) as ExtractionResult;
@@ -122,7 +127,7 @@ export async function extractFromDocument(
     };
   } catch (parseError) {
     throw new Error(
-      `Error al parsear respuesta de OpenAI: ${parseError instanceof Error ? parseError.message : String(parseError)}`
+      `Error al parsear respuesta del LLM: ${parseError instanceof Error ? parseError.message : String(parseError)}`
     );
   }
 }

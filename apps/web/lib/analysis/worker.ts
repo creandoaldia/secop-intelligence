@@ -144,8 +144,8 @@ async function processJob(jobId: string): Promise<void> {
       resumen: extraction.resumen,
       verificacion: verification ? JSON.stringify(verification.corrections) : null,
       confianza: verification?.confianza ?? null,
-      modeloExtraccion: "gpt-4o-mini",
-      modeloVerificacion: "claude-haiku",
+      modeloExtraccion: "deepseek-v4-flash",
+      modeloVerificacion: "deepseek-v4-flash",
     }).run();
 
     await updateJobStatus(jobId, "completed", { progress: 100 });

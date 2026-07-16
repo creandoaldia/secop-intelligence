@@ -1,23 +1,23 @@
 // ─────────────────────────────────────────────────────────────
-// SECOP Intelligence Hub — Anthropic Claude Haiku Verifier
-// Real implementation: cross-validate extraction results
-// Internal Judgment Day for analysis quality
+// SECOP Intelligence Hub — OpenRouter-based Verifier
+// Cross-validate extraction results usando DeepSeek V4 Flash
+// TEMPORAL: reemplazar con modelo premium cuando haya PMF
 // ─────────────────────────────────────────────────────────────
 
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 
 // ─── Config ────────────────────────────────────────────────
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const VERIFIER_MODEL = process.env.ANTHROPIC_VERIFIER_MODEL || "claude-3-haiku-20240307";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const LLM_MODEL = process.env.LLM_MODEL || "deepseek/deepseek-v4-flash";
 
 function isConfigured(): boolean {
-  return !!ANTHROPIC_API_KEY;
+  return !!OPENROUTER_API_KEY;
 }
 
 function notConfiguredError(): never {
   throw new Error(
-    "Anthropic no configurado. Define ANTHROPIC_API_KEY en .env"
+    "OpenRouter no configurado. Define OPENROUTER_API_KEY en .env"
   );
 }
 
@@ -31,14 +31,17 @@ export interface VerificationResult {
 
 // ─── SDK Lazy Init ─────────────────────────────────────────
 
-let _anthropic: Anthropic | null = null;
+let _openai: OpenAI | null = null;
 
-function getClient(): Anthropic {
+function getClient(): OpenAI {
   if (!isConfigured()) notConfiguredError();
-  if (!_anthropic) {
-    _anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY! });
+  if (!_openai) {
+    _openai = new OpenAI({
+      apiKey: OPENROUTER_API_KEY!,
+      baseURL: "https://openrouter.ai/api/v1",
+    });
   }
-  return _anthropic;
+  return _openai;
 }
 
 // ─── System Prompt ─────────────────────────────────────────
@@ -77,17 +80,17 @@ export async function verifyExtraction(
 ): Promise<VerificationResult> {
   if (!isConfigured()) notConfiguredError();
 
-  const anthropic = getClient();
+  const openai = getClient();
 
   const truncatedText = originalText.slice(0, 80_000);
   const extractedJson = JSON.stringify(extractedData, null, 2).slice(0, 20_000);
 
-  const response = await anthropic.messages.create({
-    model: VERIFIER_MODEL,
+  const response = await openai.chat.completions.create({
+    model: LLM_MODEL,
     max_tokens: 4_000,
     temperature: 0.1,
-    system: SYSTEM_PROMPT,
     messages: [
+      { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
         content: `## Texto Original del Pliego (truncado)\n\n${truncatedText}\n\n## Datos Extraidos\n\n\`\`\`json\n${extractedJson}\n\`\`\`\n\nVerifica la extraccion. Identifica errores, omisiones y alucinaciones. Proporciona correcciones especificas.`,
@@ -95,14 +98,10 @@ export async function verifyExtraction(
     ],
   });
 
-  const content = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => (block as Anthropic.TextBlock).text)
-    .join("\n");
+  const content = response.choices[0]?.message?.content;
+  if (!content) throw new Error("LLM devolvio respuesta vacia");
 
-  if (!content) throw new Error("Anthropic devolvio respuesta vacia");
-
-  // Extract JSON from the response (Claude may wrap it in markdown)
+  // Extract JSON from the response (models may wrap it in markdown)
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   const jsonStr = jsonMatch?.[0] ?? content;
 
