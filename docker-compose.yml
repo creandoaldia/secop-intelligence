@@ -1,0 +1,63 @@
+# ──────────────────────────────────────────────────────────────────────────
+# SECOP Intelligence Hub — Docker Compose
+# ──────────────────────────────────────────────────────────────────────────
+# Servicios:
+#   web      — Next.js 14 App Router (puerto 3000)
+#   doc2md   — Python FastAPI microservice (puerto 8001)
+#
+# JD FIX 4: healthcheck + depends_on con condition
+# JD FIX 7: puerto unico 8001 en todos lados
+# ──────────────────────────────────────────────────────────────────────────
+
+services:
+  doc2md:
+    build:
+      context: ./services/doc2md
+      dockerfile: Dockerfile
+    image: secop-doc2md:latest
+    container_name: secop-doc2md
+    ports:
+      - "8001:8001"
+    environment:
+      - DOC2MD_PORT=8001
+      - DOC2MD_CONVERT_TIMEOUT=300
+      - DOC2MD_MAX_CONCURRENT_EASYOCR=1
+      - DOC2MD_EASYOCR_LANG=es
+      - DOC2MD_LOG_LEVEL=info
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    # CPU-only: EasyOCR L3 runs on CPU without GPU
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: "2.0"
+    networks:
+      - secop-network
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    image: secop-web:latest
+    container_name: secop-web
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DOC2MD_SERVICE_URL=http://doc2md:8001
+    depends_on:
+      doc2md:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - secop-network
+
+networks:
+  secop-network:
+    driver: bridge

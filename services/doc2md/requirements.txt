@@ -1,0 +1,18 @@
+# doc2md-microservice -- Python HTTP sidecar for SECOP PDF-to-Markdown
+# Pinned deps for reproducible builds
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+
+# L1: markitdown (PDFs with text layer, DOCX, XLSX, PPTX, images)
+markitdown==0.1.1
+
+# L2: pymupdf4llm (table-aware PDF fallback, uses PyMuPDF/fitz)
+pymupdf4llm==0.0.18
+
+# L3: EasyOCR (scanned PDFs per-page, CPU-only)
+easyocr==1.7.2
+
+# Common deps
+pydantic==2.10.3
+Pillow==11.1.0
