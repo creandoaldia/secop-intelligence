@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
-// SECOP Intelligence Hub — Azure Document Intelligence Client
-// Real implementation using REST API directly (no SDK dependency issues)
+// SECOP Intelligence Hub — OCR Client (Azure + Local fallback)
+// TEMPORAL: Azure por defecto, cae a Tesseract local si no hay keys
 // ─────────────────────────────────────────────────────────────
 
 import { z } from "zod";
@@ -10,7 +10,7 @@ import { z } from "zod";
 const AZURE_OCR_ENDPOINT = process.env.AZURE_OCR_ENDPOINT;
 const AZURE_OCR_KEY = process.env.AZURE_OCR_KEY;
 
-function isConfigured(): boolean {
+function isAzureConfigured(): boolean {
   return !!(AZURE_OCR_ENDPOINT && AZURE_OCR_KEY);
 }
 
@@ -72,8 +72,8 @@ const ocrResponseSchema = z.object({
   })).optional(),
 });
 
-export async function analyzeDocumentFromUrl(url: string): Promise<OcrResult> {
-  if (!isConfigured()) notConfiguredError();
+export async function analyzeDocumentFromUrlAzure(url: string): Promise<OcrResult> {
+  if (!isAzureConfigured()) notConfiguredError();
 
   // Step 1: Start analysis
   const startUrl = buildUrl("documentModels/prebuilt-layout:analyze");
@@ -167,10 +167,30 @@ export async function analyzeDocumentFromUrl(url: string): Promise<OcrResult> {
   };
 }
 
+// ─── Smart Export: Azure first, local Tesseract fallback ────
+
+import { analyzeDocumentFromUrl as localOcrUrl, analyzeDocumentFromBuffer as localOcrBuffer } from "./local-client";
+
+export async function analyzeDocumentFromUrl(url: string): Promise<OcrResult> {
+  if (isAzureConfigured()) {
+    return analyzeDocumentFromUrlAzure(url);
+  }
+  console.log("[OCR] Azure no configurado, usando OCR local (Tesseract)");
+  return localOcrUrl(url);
+}
+
+export async function analyzeDocumentFromBuffer(buffer: Buffer, filename?: string): Promise<OcrResult> {
+  if (isAzureConfigured()) {
+    return analyzeDocumentFromBufferAzure(buffer);
+  }
+  console.log("[OCR] Azure no configurado, usando OCR local (Tesseract)");
+  return localOcrBuffer(buffer, filename);
+}
+
 // ─── Analyze from Buffer ───────────────────────────────────
 
-export async function analyzeDocumentFromBuffer(buffer: Buffer): Promise<OcrResult> {
-  if (!isConfigured()) notConfiguredError();
+export async function analyzeDocumentFromBufferAzure(buffer: Buffer): Promise<OcrResult> {
+  if (!isAzureConfigured()) notConfiguredError();
 
   // Step 1: Start analysis
   const startUrl = buildUrl("documentModels/prebuilt-layout:analyze");
