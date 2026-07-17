@@ -75,6 +75,10 @@ describe("CookieStore", () => {
 // ─── CAPTCHA Solver ─────────────────────────────────────────
 
 describe("CaptchaSolver", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("should return manual mode when no captcha in HTML", async () => {
     const { CaptchaSolver } = await import("@/lib/secop/captcha-solver");
     const solver = new CaptchaSolver();
@@ -101,11 +105,10 @@ describe("CaptchaSolver", () => {
     expect(result.message).toContain("CAPTCHA detectado");
   });
 
-  it("should handle 2captcha API flow (mocked)", async () => {
+  it("should handle 2captcha ReCaptcha v2 flow (mocked)", async () => {
     const { CaptchaSolver } = await import("@/lib/secop/captcha-solver");
-    const solver = new CaptchaSolver("12345678901234567890123456789012"); // valid format: 32 chars
+    const solver = new CaptchaSolver("12345678901234567890123456789012");
 
-    // Mock fetch to return captcha submitted
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
       const urlStr = url.toString();
@@ -125,9 +128,96 @@ describe("CaptchaSolver", () => {
     expect(result.solved).toBe(true);
     expect(result.token).toBe("captcha-token-abc");
     expect(result.method).toBe("auto");
+    expect(result.solvedAt).toBeGreaterThan(0);
 
-    // Restore fetch
     globalThis.fetch = originalFetch;
+  });
+
+  it("should detect and solve image captcha via 2captcha (mocked)", async () => {
+    const { CaptchaSolver } = await import("@/lib/secop/captcha-solver");
+    const solver = new CaptchaSolver("12345678901234567890123456789012");
+
+    const originalFetch = globalThis.fetch;
+    let callCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      const urlStr = url.toString();
+      callCount++;
+
+      // First call: download captcha image
+      if (callCount === 1) {
+        return new Response(Buffer.from("fake-image-data"));
+      }
+      // Second call: submit to 2captcha
+      if (urlStr.includes("in.php") && urlStr.includes("method=base64")) {
+        return new Response(JSON.stringify({ status: 1, request: "img-12345" }));
+      }
+      // Third call: poll for result
+      if (urlStr.includes("res.php")) {
+        return new Response(JSON.stringify({ status: 1, request: "ABCDEF" }));
+      }
+      return originalFetch(url);
+    });
+
+    const html = '<html><div><img id="imgimgCaptcha" src="/captcha/image.aspx?123"/></div></html>';
+    const result = await solver.solveIfPresent("https://community.secop.gov.co/STS/Users/Login/Index", html);
+
+    expect(result.solved).toBe(true);
+    expect(result.token).toBe("ABCDEF");
+    expect(result.method).toBe("auto");
+    expect(result.message).toContain("Imagen captcha");
+
+    globalThis.fetch = originalFetch;
+  });
+
+  it("should prioritize ReCaptcha v2 over image captcha", async () => {
+    const { CaptchaSolver } = await import("@/lib/secop/captcha-solver");
+    const solver = new CaptchaSolver("12345678901234567890123456789012");
+
+    // HTML with BOTH captcha types — ReCaptcha should win
+    const html = `
+      <html>
+        <div id="divGoogleReCaptchaDiv">
+          <div class="g-recaptcha" data-sitekey="6LcMmakZAAAAAB157Q90hORUGtNd790TCws4vBNw"></div>
+        </div>
+        <div id="divCaptchaLogin" class="captchaElement">
+          <img id="imgimgCaptcha" src="/captcha/image.aspx?123"/>
+        </div>
+      </html>
+    `;
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("in.php")) {
+        // Verify it's sending userrecaptcha (not base64)
+        expect(urlStr).toContain("method=userrecaptcha");
+        return new Response(JSON.stringify({ status: 1, request: "12345" }));
+      }
+      if (urlStr.includes("res.php")) {
+        return new Response(JSON.stringify({ status: 1, request: "recaptcha-token" }));
+      }
+      return originalFetch(url);
+    });
+
+    const result = await solver.solveIfPresent("https://example.com", html);
+    expect(result.solved).toBe(true);
+    expect(result.token).toBe("recaptcha-token");
+    expect(result.method).toBe("auto");
+
+    globalThis.fetch = originalFetch;
+  });
+
+  it("should detect token expiry correctly", async () => {
+    const { CaptchaSolver } = await import("@/lib/secop/captcha-solver");
+    const solver = new CaptchaSolver("12345678901234567890123456789012");
+
+    // Token solved 2 minutes ago — expired
+    const oldSolve = Date.now() - 120_000;
+    expect(solver.isTokenExpired(oldSolve)).toBe(true);
+
+    // Token solved 5 seconds ago — fresh
+    const recentSolve = Date.now() - 5_000;
+    expect(solver.isTokenExpired(recentSolve)).toBe(false);
   });
 });
 
@@ -141,12 +231,11 @@ describe("SecopAuthClient", () => {
   it("should require credentials to be configured", async () => {
     const { SecopAuthClient } = await import("@/lib/secop/auth");
     
-    // Clear env vars for this test
     vi.stubEnv("SECOP_BOT_USERNAME", "");
     vi.stubEnv("SECOP_BOT_PASSWORD", "");
     
     const client = new SecopAuthClient();
-    await client.init(); // CookieStore needs init even for in-memory
+    await client.init();
     
     await expect(client.login()).rejects.toThrow("SECOP_BOT_USERNAME");
   });
@@ -154,14 +243,12 @@ describe("SecopAuthClient", () => {
   it("should create a session object on successful login (mocked)", async () => {
     const { SecopAuthClient } = await import("@/lib/secop/auth");
     
-    // Set env vars for this test
     vi.stubEnv("SECOP_BOT_USERNAME", "test-bot");
     vi.stubEnv("SECOP_BOT_PASSWORD", "test-pass");
 
     const client = new SecopAuthClient();
     await client.init();
 
-    // Mock the internal HTTP call
     vi.spyOn(client as any, "doLoginRequest").mockResolvedValue({
       success: true,
       cookies: "ASP.NET_SessionId=mock123; .ASPXAUTH=mockAuth",
@@ -188,15 +275,77 @@ describe("SecopAuthClient", () => {
       sessionExpiresAt: new Date(Date.now() + 3600000),
     });
 
-    // First login
     const session1 = await client.login();
     expect(session1.cookies).toContain("fresh123");
 
-    // Second call should reuse the cached session (no second login call)
     mockLogin.mockClear();
     const session2 = await client.getValidSession();
     expect(session2.cookies).toContain("fresh123");
     expect(mockLogin).not.toHaveBeenCalled();
+  });
+
+  it("should extract mkey from login page HTML", async () => {
+    const { SecopAuthClient } = await import("@/lib/secop/auth");
+    const client = new SecopAuthClient();
+    
+    const html = `<div>
+      <input onclick="javascript:getAction('/STS/Users/Login/CaptchaCheck?responseKey=test&mkey=d0ee078c83cb438eaf8f95cd8bbdbd1c',true);" />
+    </div>`;
+
+    const mkey = (client as any).extractMkey(html);
+    expect(mkey).toBe("d0ee078c83cb438eaf8f95cd8bbdbd1c");
+  });
+
+  it("should return empty string when no mkey in HTML", async () => {
+    const { SecopAuthClient } = await import("@/lib/secop/auth");
+    const client = new SecopAuthClient();
+    
+    const mkey = (client as any).extractMkey("<html>no mkey here</html>");
+    expect(mkey).toBe("");
+  });
+
+  it("should retry login on failure up to MAX_LOGIN_RETRIES times", async () => {
+    const { SecopAuthClient } = await import("@/lib/secop/auth");
+    
+    vi.stubEnv("SECOP_BOT_USERNAME", "test-bot");
+    vi.stubEnv("SECOP_BOT_PASSWORD", "test-pass");
+
+    const client = new SecopAuthClient();
+    await client.init();
+
+    // Mock to fail twice, succeed on third attempt
+    let callCount = 0;
+    vi.spyOn(client as any, "doLoginRequest").mockImplementation(async () => {
+      callCount++;
+      if (callCount < 3) {
+        throw new Error("SECOP login failed (HTTP 500)");
+      }
+      return {
+        success: true,
+        cookies: "ASP.NET_SessionId=retry-ok",
+        sessionExpiresAt: new Date(Date.now() + 3600000),
+      };
+    });
+
+    const session = await client.login();
+    expect(session.cookies).toContain("retry-ok");
+    expect(callCount).toBe(3); // 2 fails + 1 success
+  });
+
+  it("should throw after MAX_LOGIN_RETRIES failures", async () => {
+    const { SecopAuthClient } = await import("@/lib/secop/auth");
+    
+    vi.stubEnv("SECOP_BOT_USERNAME", "test-bot");
+    vi.stubEnv("SECOP_BOT_PASSWORD", "test-pass");
+
+    const client = new SecopAuthClient();
+    await client.init();
+
+    vi.spyOn(client as any, "doLoginRequest").mockRejectedValue(
+      new Error("SECOP login failed (HTTP 500)")
+    );
+
+    await expect(client.login()).rejects.toThrow("HTTP 500");
   });
 });
 
