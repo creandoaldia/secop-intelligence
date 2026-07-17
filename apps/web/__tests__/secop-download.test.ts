@@ -223,9 +223,102 @@ describe("CaptchaSolver", () => {
 
 // ─── SECOP Auth ─────────────────────────────────────────────
 
+// ─── CaptchaTracker ──────────────────────────────────────────
+
+describe("CaptchaTracker", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("should track a full solve flow from startAttempt through reportLogin", async () => {
+    const { CaptchaTracker } = await import("@/lib/secop/captcha-tracker");
+    const tracker = new CaptchaTracker();
+
+    const id = tracker.startAttempt("recaptcha_v2", 0);
+    expect(id).toBeDefined();
+
+    tracker.reportSolve(id, true, 5000);
+    tracker.reportCaptchaCheck(id, true);
+    tracker.reportLogin(id, true);
+
+    const stats = tracker.getStats();
+    expect(stats.totalAttempts).toBe(1);
+    expect(stats.solveSuccessRate).toBe(1);
+    expect(stats.fullSuccessRate).toBe(1);
+    expect(stats.totalCostUsd).toBeGreaterThan(0);
+  });
+
+  it("should compute correct stats for mixed successes and failures", async () => {
+    const { CaptchaTracker } = await import("@/lib/secop/captcha-tracker");
+    const tracker = new CaptchaTracker();
+
+    // 2 successes, 1 failure
+    const id1 = tracker.startAttempt("recaptcha_v2", 0);
+    tracker.reportSolve(id1, true, 3000);
+    tracker.reportCaptchaCheck(id1, true);
+    tracker.reportLogin(id1, true);
+
+    const id2 = tracker.startAttempt("recaptcha_v2", 1);
+    tracker.reportSolve(id2, true, 4000);
+    tracker.reportCaptchaCheck(id2, true);
+    tracker.reportLogin(id2, true);
+
+    const id3 = tracker.startAttempt("image", 0);
+    tracker.reportSolve(id3, false, 60000, "2captcha: timeout");
+
+    const stats = tracker.getStats();
+    expect(stats.totalAttempts).toBe(3);
+    expect(stats.solveSuccessRate).toBeCloseTo(2 / 3, 5);
+    expect(stats.fullSuccessRate).toBeCloseTo(2 / 3, 5);
+  });
+
+  it("should not trip circuit breaker with low usage", async () => {
+    const { CaptchaTracker } = await import("@/lib/secop/captcha-tracker");
+    const tracker = new CaptchaTracker();
+
+    const id = tracker.startAttempt("recaptcha_v2", 0);
+    tracker.reportSolve(id, true, 2000);
+    tracker.reportCaptchaCheck(id, true);
+    tracker.reportLogin(id, true);
+
+    const cb = tracker.isCircuitBroken();
+    expect(cb.broken).toBe(false);
+  });
+
+  it("should generate a readable summary without throwing", async () => {
+    const { CaptchaTracker } = await import("@/lib/secop/captcha-tracker");
+    const tracker = new CaptchaTracker();
+
+    const id = tracker.startAttempt("recaptcha_v2", 0);
+    tracker.reportSolve(id, true, 3000);
+    tracker.reportLogin(id, true);
+
+    const summary = tracker.getSummary();
+    expect(summary).toContain("Captcha Usage Report");
+    expect(summary).toContain("$");
+  });
+
+  it("should estimate cost differently for recaptcha vs image", async () => {
+    const { CaptchaTracker } = await import("@/lib/secop/captcha-tracker");
+    const tracker = new CaptchaTracker();
+
+    // Access private estimateCost via any cast
+    const recaptchaCost = (tracker as any).estimateCost("recaptcha_v2");
+    const imageCost = (tracker as any).estimateCost("image");
+
+    expect(recaptchaCost).toBeGreaterThan(imageCost);
+    expect(recaptchaCost).toBe(0.001); // $1/1000
+    expect(imageCost).toBe(0.0005);    // $0.50/1000
+  });
+});
+
+// ─── SECOP Auth ─────────────────────────────────────────────
+
 describe("SecopAuthClient", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("should require credentials to be configured", async () => {

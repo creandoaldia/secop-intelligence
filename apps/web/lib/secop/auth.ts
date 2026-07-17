@@ -11,6 +11,7 @@
 
 import { CookieStore, StoredCookie } from "./cookie-store";
 import { CaptchaSolver } from "./captcha-solver";
+import { CaptchaTracker } from "./captcha-tracker";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -49,11 +50,18 @@ const BROWSER_HEADERS = {
 export class SecopAuthClient {
   private cookieStore: CookieStore;
   private captchaSolver: CaptchaSolver;
+  private tracker: CaptchaTracker;
   private cachedSession: SecopSession | null = null;
 
-  constructor(cookieStore?: CookieStore, captchaSolver?: CaptchaSolver) {
+  constructor(cookieStore?: CookieStore, captchaSolver?: CaptchaSolver, tracker?: CaptchaTracker) {
     this.cookieStore = cookieStore ?? new CookieStore();
     this.captchaSolver = captchaSolver ?? new CaptchaSolver();
+    this.tracker = tracker ?? new CaptchaTracker();
+  }
+
+  /** Expose tracker for external reads (summary, stats). */
+  getTracker(): CaptchaTracker {
+    return this.tracker;
   }
 
   /**
@@ -101,6 +109,14 @@ export class SecopAuthClient {
       );
     }
 
+    // Check circuit breaker before attempting
+    const cb = this.tracker.isCircuitBroken();
+    if (cb.broken) {
+      console.warn(`[CaptchaTracker] ${cb.reason}`);
+      console.log(this.tracker.getSummary());
+      throw new Error(`Circuit breaker activado: ${cb.reason}`);
+    }
+
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt < MAX_LOGIN_RETRIES; attempt++) {
@@ -125,6 +141,7 @@ export class SecopAuthClient {
         );
 
         console.log(`[SECOP Auth] Login OK (attempt ${attempt + 1}/${MAX_LOGIN_RETRIES})`);
+        console.log(this.tracker.getSummary());
         return this.cachedSession;
 
       } catch (err) {
@@ -144,6 +161,7 @@ export class SecopAuthClient {
       }
     }
 
+    console.log(this.tracker.getSummary());
     throw lastError ?? new Error("SECOP login failed after all retries");
   }
 
@@ -183,10 +201,17 @@ export class SecopAuthClient {
     const mkey = this.extractMkey(loginPageHtml);
 
     // ── Step 2: Captcha detection and solving ───────────────
+    const solveStart = Date.now();
+    const recordId = this.tracker.startAttempt("recaptcha_v2", attempt);
+
     const captchaResult = await this.captchaSolver.solveIfPresent(
       SECOP_LOGIN_URL,
       loginPageHtml
     );
+
+    const solveDuration = Date.now() - solveStart;
+    this.tracker.reportSolve(recordId, captchaResult.solved, solveDuration);
+    this.tracker.flushRecord(recordId);
 
     // ── Step 2b: If ReCaptcha solved → submit to CaptchaCheck ──
     if (captchaResult.solved && captchaResult.token && captchaResult.method === "auto") {
@@ -195,6 +220,9 @@ export class SecopAuthClient {
       const checkRes = await fetch(captchaCheckUrl, {
         headers: { ...BROWSER_HEADERS, Cookie: cookieJar, Referer: SECOP_LOGIN_URL },
       });
+
+      this.tracker.reportCaptchaCheck(recordId, checkRes.ok);
+      this.tracker.flushRecord(recordId);
 
       if (!checkRes.ok) {
         throw new Error(
@@ -245,6 +273,9 @@ export class SecopAuthClient {
         .join("; ")
         .trim();
 
+      this.tracker.reportLogin(recordId, true);
+      this.tracker.flushRecord(recordId);
+
       return {
         success: true,
         cookies: cookieStr || "ASP.NET_SessionId=unknown",
@@ -258,6 +289,9 @@ export class SecopAuthClient {
       body.includes("recaptcha") ||
       body.includes("ReCaptcha") ||
       body.includes('class="captchaElement"');
+
+    this.tracker.reportLogin(recordId, false);
+    this.tracker.flushRecord(recordId);
 
     if (failedDueToCaptcha) {
       throw new Error(
