@@ -303,13 +303,29 @@ describe("CaptchaTracker", () => {
     const { CaptchaTracker } = await import("@/lib/secop/captcha-tracker");
     const tracker = new CaptchaTracker();
 
-    // Access private estimateCost via any cast
     const recaptchaCost = (tracker as any).estimateCost("recaptcha_v2");
     const imageCost = (tracker as any).estimateCost("image");
 
     expect(recaptchaCost).toBeGreaterThan(imageCost);
-    expect(recaptchaCost).toBe(0.001); // $1/1000
-    expect(imageCost).toBe(0.0005);    // $0.50/1000
+    expect(recaptchaCost).toBe(0.001);
+    expect(imageCost).toBe(0.0005);
+  });
+
+  it("should loadHistory without crashing (DB graceful handling)", async () => {
+    const { CaptchaTracker } = await import("@/lib/secop/captcha-tracker");
+    const tracker = new CaptchaTracker();
+    await expect(tracker.loadHistory()).resolves.not.toThrow();
+  });
+
+  it("should persistRecord without crashing (async DB write)", async () => {
+    const { CaptchaTracker } = await import("@/lib/secop/captcha-tracker");
+    const tracker = new CaptchaTracker();
+
+    const id = tracker.startAttempt("recaptcha_v2", 0);
+    tracker.reportSolve(id, true, 3000);
+    tracker.reportLogin(id, true);
+
+    await expect(tracker.persistRecord(id)).resolves.not.toThrow();
   });
 });
 

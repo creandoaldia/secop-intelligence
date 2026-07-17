@@ -161,6 +161,7 @@ export const analysisJobs = sqliteTable("analysis_jobs", {
     .default(sql`(strftime('%s','now'))`),
   completedAt: integer("completed_at", { mode: "timestamp" }),
   error: text("error"),
+  metadata: text("metadata"), // JSON: per-stage timing, doc type, methods, etc
 });
 
 export const analysisResults = sqliteTable("analysis_results", {

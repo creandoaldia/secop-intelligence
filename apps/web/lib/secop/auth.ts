@@ -12,6 +12,8 @@
 import { CookieStore, StoredCookie } from "./cookie-store";
 import { CaptchaSolver } from "./captcha-solver";
 import { CaptchaTracker } from "./captcha-tracker";
+import { db } from "@/lib/db";
+import { activityLog } from "@/lib/db/schema";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -69,6 +71,7 @@ export class SecopAuthClient {
    */
   async init(): Promise<void> {
     await this.cookieStore.init();
+    await this.tracker.loadHistory();
   }
 
   /**
@@ -117,6 +120,9 @@ export class SecopAuthClient {
       throw new Error(`Circuit breaker activado: ${cb.reason}`);
     }
 
+    // Log SECOP login intent
+    let sessionLogId: number | null = null;
+
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt < MAX_LOGIN_RETRIES; attempt++) {
@@ -140,6 +146,15 @@ export class SecopAuthClient {
           loginResult.sessionExpiresAt
         );
 
+        // Log successful SECOP session
+        const cookieHash = this.simpleHash(loginResult.cookies);
+        await db.insert(activityLog).values({
+          action: "secop.login",
+          entity: "secop_session",
+          entityId: cookieHash,
+          metadata: JSON.stringify({ loginOk: true, attempt, retries: attempt }),
+        });
+
         console.log(`[SECOP Auth] Login OK (attempt ${attempt + 1}/${MAX_LOGIN_RETRIES})`);
         console.log(this.tracker.getSummary());
         return this.cachedSession;
@@ -160,6 +175,13 @@ export class SecopAuthClient {
         }
       }
     }
+
+    // Log failed SECOP login
+    await db.insert(activityLog).values({
+      action: "secop.login",
+      entity: "secop_session",
+      metadata: JSON.stringify({ loginOk: false, error: lastError?.message }),
+    }).catch(() => {});
 
     console.log(this.tracker.getSummary());
     throw lastError ?? new Error("SECOP login failed after all retries");
@@ -211,7 +233,6 @@ export class SecopAuthClient {
 
     const solveDuration = Date.now() - solveStart;
     this.tracker.reportSolve(recordId, captchaResult.solved, solveDuration);
-    this.tracker.flushRecord(recordId);
 
     // ── Step 2b: If ReCaptcha solved → submit to CaptchaCheck ──
     if (captchaResult.solved && captchaResult.token && captchaResult.method === "auto") {
@@ -222,9 +243,9 @@ export class SecopAuthClient {
       });
 
       this.tracker.reportCaptchaCheck(recordId, checkRes.ok);
-      this.tracker.flushRecord(recordId);
 
       if (!checkRes.ok) {
+        await this.tracker.persistRecord(recordId);
         throw new Error(
           `CaptchaCheck failed (HTTP ${checkRes.status}). ` +
           `El token de 2captcha puede haber expirado. Reintentando...`
@@ -274,7 +295,7 @@ export class SecopAuthClient {
         .trim();
 
       this.tracker.reportLogin(recordId, true);
-      this.tracker.flushRecord(recordId);
+      await this.tracker.persistRecord(recordId);
 
       return {
         success: true,
@@ -291,7 +312,7 @@ export class SecopAuthClient {
       body.includes('class="captchaElement"');
 
     this.tracker.reportLogin(recordId, false);
-    this.tracker.flushRecord(recordId);
+    await this.tracker.persistRecord(recordId);
 
     if (failedDueToCaptcha) {
       throw new Error(
@@ -339,5 +360,18 @@ export class SecopAuthClient {
       html.includes('id="imgimgCaptcha"') ||
       html.includes('class="captchaElement"')
     );
+  }
+
+  /**
+   * Simple hash for cookie values (not cryptographic — just for correlation).
+   */
+  private simpleHash(str: string): string {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash |= 0;
+    }
+    return Math.abs(hash).toString(16);
   }
 }
