@@ -120,9 +120,6 @@ export class SecopAuthClient {
       throw new Error(`Circuit breaker activado: ${cb.reason}`);
     }
 
-    // Log SECOP login intent
-    let sessionLogId: number | null = null;
-
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt < MAX_LOGIN_RETRIES; attempt++) {
@@ -214,9 +211,12 @@ export class SecopAuthClient {
     attempt: number = 0
   ): Promise<LoginResponse> {
     // ── Step 1: GET login page ──────────────────────────────
-    const loginPageRes = await fetch(SECOP_LOGIN_URL, { headers: BROWSER_HEADERS });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    const loginPageRes = await fetch(SECOP_LOGIN_URL, { headers: BROWSER_HEADERS, signal: controller.signal });
+    clearTimeout(timeout);
     const loginPageHtml = await loginPageRes.text();
-    const setCookieHeaders = loginPageRes.headers.getSetCookie?.() ?? [];
+    const setCookieHeaders = this.extractSetCookie(loginPageRes.headers);
     const cookieJar = this.buildCookieString(setCookieHeaders);
 
     // Extract mkey from HTML (embedded in onclick handlers)
@@ -242,9 +242,11 @@ export class SecopAuthClient {
         headers: { ...BROWSER_HEADERS, Cookie: cookieJar, Referer: SECOP_LOGIN_URL },
       });
 
-      this.tracker.reportCaptchaCheck(recordId, checkRes.ok);
+      const checkBody = await checkRes.text().catch(() => "");
+      const checkOk = checkRes.ok && !checkBody.includes("error") && !checkBody.includes("Error");
+      this.tracker.reportCaptchaCheck(recordId, checkOk);
 
-      if (!checkRes.ok) {
+      if (!checkOk) {
         await this.tracker.persistRecord(recordId);
         throw new Error(
           `CaptchaCheck failed (HTTP ${checkRes.status}). ` +
@@ -336,9 +338,24 @@ export class SecopAuthClient {
   private extractMkey(html: string): string {
     const match = html.match(/mkey=([a-f0-9]{32})/i);
     if (match) return match[1];
-    // Fallback: use a known mkey from the HTML
-    console.warn("[SECOP Auth] mkey not found in HTML, using empty fallback");
-    return "";
+    throw new Error(
+      "mkey no encontrado en el HTML de SECOP. " +
+      "La pagina de login puede haber cambiado. Verificar manualmente."
+    );
+  }
+
+  /**
+   * Extract Set-Cookie headers with legacy fallback for Node <19.
+   */
+  private extractSetCookie(headers: Headers): string[] {
+    if (typeof headers.getSetCookie === "function") {
+      return headers.getSetCookie() ?? [];
+    }
+    // Legacy fallback for Node 18
+    const raw = headers.get("set-cookie");
+    if (!raw) return [];
+    // Multiple Set-Cookie are joined with comma in Node 18
+    return raw.split(",").map((c: string) => c.trim());
   }
 
   /**

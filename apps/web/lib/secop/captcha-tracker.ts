@@ -88,7 +88,7 @@ export class CaptchaTracker {
             sql`${activityLog.createdAt} > strftime('%s','now','-30 days')`
           )
         )
-        .orderBy(sql`${activityLog.createdAt} DESC`)
+        .orderBy(sql`${activityLog.createdAt} ASC`)
         .limit(500)
         .all();
 

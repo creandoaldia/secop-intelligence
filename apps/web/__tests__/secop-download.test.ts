@@ -405,12 +405,11 @@ describe("SecopAuthClient", () => {
     expect(mkey).toBe("d0ee078c83cb438eaf8f95cd8bbdbd1c");
   });
 
-  it("should return empty string when no mkey in HTML", async () => {
+  it("should throw when no mkey in HTML", async () => {
     const { SecopAuthClient } = await import("@/lib/secop/auth");
     const client = new SecopAuthClient();
     
-    const mkey = (client as any).extractMkey("<html>no mkey here</html>");
-    expect(mkey).toBe("");
+    expect(() => (client as any).extractMkey("<html>no mkey here</html>")).toThrow("mkey no encontrado");
   });
 
   it("should retry login on failure up to MAX_LOGIN_RETRIES times", async () => {
