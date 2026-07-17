@@ -188,17 +188,6 @@ export class SecopAuthClient {
       loginPageHtml
     );
 
-    // ⏱ If this is a retry and the token is stale, re-solve
-    if (
-      captchaResult.solved &&
-      captchaResult.solvedAt &&
-      this.captchaSolver.isTokenExpired(captchaResult.solvedAt)
-    ) {
-      console.log("[SECOP Auth] Token expired, re-solving...");
-      // Force re-solve — the detector will find the captcha again
-      // since auth.ts keeps the same pageHtml in retries
-    }
-
     // ── Step 2b: If ReCaptcha solved → submit to CaptchaCheck ──
     if (captchaResult.solved && captchaResult.token && captchaResult.method === "auto") {
       const captchaCheckUrl = `${SECOP_BASE}/STS/Users/Login/CaptchaCheck?responseKey=${encodeURIComponent(captchaResult.token)}&mkey=${encodeURIComponent(mkey)}`;
@@ -246,7 +235,7 @@ export class SecopAuthClient {
 
     // ── Step 5: Process response ────────────────────────────
     const allCookies = [
-      ...(attempt === 0 ? setCookieHeaders : []),
+      ...setCookieHeaders,
       ...(loginRes.headers.getSetCookie?.() ?? []),
     ];
 
