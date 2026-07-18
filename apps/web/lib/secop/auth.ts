@@ -66,6 +66,11 @@ export class SecopAuthClient {
     return this.tracker;
   }
 
+  /** Expose captcha solver for download client. */
+  getSolver(): CaptchaSolver {
+    return this.captchaSolver;
+  }
+
   /**
    * Initialize the cookie store (must be called before use).
    */
