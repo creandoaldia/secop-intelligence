@@ -87,6 +87,8 @@ export class SecopDownloadClient {
       /fileId=(\d+)/gi,
       /data-fileid=["'](\d+)["']/g,
       /documento[^"]*fileid=(\d+)/gi,
+      // Pattern for SECOP JavaScript: documentFileId=' + '123456' + '&amp;mkey=
+      /documentFileId=\s*['"]\s*\+\s*['"](\d+)['"]\s*\+/gi,
     ];
 
     const fileIds = new Set<string>();
@@ -248,9 +250,13 @@ export class SecopDownloadClient {
 
       console.log(`[SECOP Download] CaptchaCheck URL: ${checkUrl}`);
 
+      // El form ASP.NET espera txaresponseKey (donde se copia g-recaptcha-response)
+      // y los hidden Post_Back_Action_Name_Hidden + Post_Back_Arguments_Hidden
       const checkBodyData = new URLSearchParams({
-        responseKey: captchaResult.token,
-        mkey: mkey,
+        txaresponseKey: captchaResult.token,
+        Post_Back_Action_Name_Hidden: "",
+        Post_Back_Arguments_Hidden: "",
+        btnCaptchaCheckButton: "Submit",
       });
 
       // CaptchaCheck puede devolver 302 + Set-Cookie con bypass.
@@ -375,14 +381,16 @@ export class SecopDownloadClient {
   }
 
   /**
-   * Download a PDF from SECOP using a FileId.
+   * Download a document from SECOP using a FileId.
+   * Returns Buffer (may be PDF, DOCX, XLSX, etc.)
    */
   /* protected — for testing via vi.spyOn */
   async downloadFile(
     fileId: string,
     session: SecopSession
   ): Promise<Buffer> {
-    const downloadUrl = `${SECOP_BASE}/Public/Archivo/DownloadFile?FileId=${fileId}`;
+    // Try primary download URL first (Licitacion Publica / Concurso de Meritos)
+    const downloadUrl = `${SECOP_BASE}/Public/Tendering/OpportunityDetail/DownloadFile?documentFileId=${fileId}`;
 
     const res = await fetch(downloadUrl, {
       headers: {
@@ -390,44 +398,73 @@ export class SecopDownloadClient {
         Cookie: session.cookies,
         Referer: SECOP_BASE + "/Public/Tendering/OpportunityDetail/",
       },
+      redirect: "manual",
     });
 
     if (res.status === 404) {
       throw new Error(
-        `HTTP 404: Documento no encontrado (FileId=${fileId}). ` +
-        `Puede haber expirado o el FileId es incorrecto.`
+        `HTTP 404: Documento no encontrado (FileId=${fileId})`
       );
     }
 
     if (res.status === 403) {
       throw new Error(
         `HTTP 403: Acceso denegado al documento (FileId=${fileId}). ` +
-        `La sesion SECOP puede haber expirado. Reintentando login...`
+        `La sesion SECOP puede haber expirado.`
       );
     }
 
-    if (!res.ok) {
-      throw new Error(
-        `HTTP ${res.status}: Error descargando documento (FileId=${fileId})`
+    // Handle JS redirect: <script>window.location.href = '/Public/Archive/RetrieveFile/Index?...'</script>
+    const body = await res.text();
+    const jsMatch = body.match(/window\.location\.href\s*=\s*'([^']+)'/);
+    if (jsMatch) {
+      const retrieveUrl = `${SECOP_BASE}${jsMatch[1]}`;
+      console.log(`[SECOP Download] Siguiendo redirect a RetrieveFile...`);
+
+      const retrieveRes = await fetch(retrieveUrl, {
+        headers: {
+          ...BROWSER_HEADERS,
+          Cookie: session.cookies,
+          Referer: downloadUrl,
+        },
+      });
+
+      if (!retrieveRes.ok) {
+        throw new Error(
+          `HTTP ${retrieveRes.status}: Error en RetrieveFile (FileId=${fileId})`
+        );
+      }
+
+      const buffer = Buffer.from(await retrieveRes.arrayBuffer());
+      const fileName = retrieveRes.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] || `${fileId}.bin`;
+      console.log(
+        `[SECOP Download] Documento descargado: ${fileName}, ` +
+        `${(buffer.length / 1024).toFixed(0)} KB via RetrieveFile`
       );
+      return buffer;
     }
 
-    const arrayBuffer = await res.arrayBuffer();
-    const pdfBuffer = Buffer.from(arrayBuffer);
-
-    if (pdfBuffer.length < 100 || !pdfBuffer.toString().startsWith("%PDF")) {
-      throw new Error(
-        `El archivo descargado (FileId=${fileId}, ${pdfBuffer.length} bytes) ` +
-        `no parece ser un PDF valido.`
-      );
+    // Fallback: try Archivo/DownloadFile
+    if (res.status === 302 || (res.ok && body.length < 500)) {
+      const fallbackUrl = `${SECOP_BASE}/Public/Archivo/DownloadFile?FileId=${fileId}`;
+      console.log(`[SECOP Download] Fallback a: ${fallbackUrl}`);
+      const fallbackRes = await fetch(fallbackUrl, {
+        headers: {
+          ...BROWSER_HEADERS,
+          Cookie: session.cookies,
+          Referer: SECOP_BASE + "/Public/Tendering/OpportunityDetail/",
+        },
+      });
+      if (fallbackRes.ok) {
+        const buffer = Buffer.from(await fallbackRes.arrayBuffer());
+        console.log(`[SECOP Download] Documento descargado: FileId=${fileId}, ${(buffer.length / 1024).toFixed(0)} KB`);
+        return buffer;
+      }
     }
 
-    console.log(
-      `[SECOP Download] PDF descargado: FileId=${fileId}, ` +
-      `${(pdfBuffer.length / 1024).toFixed(0)} KB`
+    throw new Error(
+      `No se pudo descargar documento FileId=${fileId} (HTTP ${res.status})`
     );
-
-    return pdfBuffer;
   }
 
   /**
