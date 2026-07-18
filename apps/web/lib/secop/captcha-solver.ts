@@ -30,10 +30,11 @@ export class CaptchaSolver {
   }
 
   /**
-   * Check the page HTML for captcha challenges in priority order:
-   * 1. Google ReCaptcha v2 (g-recaptcha)
-   * 2. Custom image captcha (id="imgCaptcha" / captchaElement)
-   * Only ONE captcha is solved per call to avoid waste.
+   * Check the page HTML for VISIBLE captcha challenges in priority order:
+   * 1. Google ReCaptcha v2 (g-recaptcha) — solo si NO esta display:none
+   * 2. Custom image captcha (id="imgCaptcha" / captchaElement) — solo si visible
+   * SECOP incluye markup de captcha SIEMPRE en el HTML pero OCULTO (display:none).
+   * Solo aparece tras intentos de login fallidos.
    */
   async solveIfPresent(
     pageUrl: string,
@@ -58,22 +59,40 @@ export class CaptchaSolver {
       };
     }
 
-    // Priority 1: Google ReCaptcha v2
+    // Priority 1: Google ReCaptcha v2 — solo si visible
     const resolvedSiteKey = siteKey ?? this.extractSiteKey(pageHtml);
-    if (resolvedSiteKey) {
-      console.log("[captcha] ReCaptcha v2 detected, solving...");
+    if (resolvedSiteKey && !this.isCaptchaHidden(pageHtml, "recaptcha")) {
+      console.log("[captcha] ReCaptcha v2 detected and VISIBLE, solving...");
       return this.solveWith2Captcha(pageUrl, resolvedSiteKey);
     }
 
-    // Priority 2: Custom image captcha (VORTAL SECOP)
+    // Priority 2: Custom image captcha (VORTAL SECOP) — solo si visible
     const imageUrl = this.extractImageCaptchaUrl(pageHtml, pageUrl);
-    if (imageUrl) {
-      console.log("[captcha] Image captcha detected, solving...");
+    if (imageUrl && !this.isCaptchaHidden(pageHtml, "image")) {
+      console.log("[captcha] Image captcha detected and VISIBLE, solving...");
       return this.solveImageCaptcha(imageUrl);
     }
 
-    // No captcha detected
-    return { solved: false, method: "manual", message: "No CAPTCHA detected" };
+    // No captcha detected (or hidden)
+    return { solved: false, method: "manual", message: "No CAPTCHA detected or captcha is hidden" };
+  }
+
+  /**
+   * Check if a captcha element is hidden via display:none in the HTML.
+   * SECOP includes captcha markup always but hides it until needed.
+   */
+  private isCaptchaHidden(html: string, type: "recaptcha" | "image"): boolean {
+    if (type === "recaptcha") {
+      // Check if the ReCaptcha container div has display:none
+      const recaptchaDiv = html.match(/<div[^>]*id="divGoogleReCaptchaDiv"[^>]*>/i);
+      return recaptchaDiv !== null && /style=["'][^"']*display\s*:\s*none/i.test(recaptchaDiv[0]);
+    }
+    if (type === "image") {
+      // Check if the captcha login div has display:none
+      const captchaDiv = html.match(/<div[^>]*id="divCaptchaLogin"[^>]*>/i);
+      return captchaDiv !== null && /style=["'][^"']*display\s*:\s*none/i.test(captchaDiv[0]);
+    }
+    return false;
   }
 
   // ─── Public helpers for auth.ts ─────────────────────────────

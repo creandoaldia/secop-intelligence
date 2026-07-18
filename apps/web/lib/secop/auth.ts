@@ -336,8 +336,12 @@ export class SecopAuthClient {
    * Pattern: mkey=<32-hex-chars> in URL query strings.
    */
   private extractMkey(html: string): string {
-    const match = html.match(/mkey=([a-f0-9]{32})/i);
+    // SECOP cambio formato: antes era [a-f0-9]{32}, ahora es UUID con underscores (8_4_4_4_12)
+    const match = html.match(/mkey=([a-f0-9_]{36})/i);
     if (match) return match[1];
+    // Fallback: intentar el formato anterior por si retroceden
+    const oldMatch = html.match(/mkey=([a-f0-9]{32})/i);
+    if (oldMatch) return oldMatch[1];
     throw new Error(
       "mkey no encontrado en el HTML de SECOP. " +
       "La pagina de login puede haber cambiado. Verificar manualmente."
