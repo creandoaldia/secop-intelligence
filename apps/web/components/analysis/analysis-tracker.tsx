@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { StatusCard } from "@/components/analysis/status-card"
 import { ResultsDisplay } from "@/components/analysis/results-display"
 import { Button } from "@/components/ui/button"
 import { RotateCwIcon } from "lucide-react"
+import { toast } from "sonner"
 import type { AnalysisJobStatus } from "@/lib/analysis/types"
 
 interface AnalysisJob {
@@ -44,25 +45,49 @@ export function AnalysisTracker({ analysisId, procesoId }: AnalysisTrackerProps)
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
+  const [authError, setAuthError] = useState(false)
+  const [notFound, setNotFound] = useState(false)
+  const previousStatus = useRef<AnalysisJobStatus | undefined>(undefined)
 
   useEffect(() => {
     setJob(null)
     setResult(null)
     setError(null)
     setRetrying(false)
+    setAuthError(false)
+    setNotFound(false)
+    previousStatus.current = undefined
   }, [analysisId])
 
   const poll = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/analysis/${id}`)
-      if (res.status === 404) return "continue"
+      if (res.status === 401) {
+        setAuthError(true)
+        return "auth_error"
+      }
+      if (res.status === 404) {
+        setNotFound(true)
+        return "not_found"
+      }
       if (!res.ok) throw new Error("Error al consultar estado")
       const data = await res.json()
+
+      const status = data.job.estado as AnalysisJobStatus
+      if (previousStatus.current && PROCESSING_STATES.has(previousStatus.current)) {
+        if (status === "completed") {
+          toast.success("Análisis completado")
+        } else if (status === "failed") {
+          toast.error("Análisis fallido")
+        }
+      }
+      previousStatus.current = status
+
       setJob(data.job)
       setResult(data.result)
 
-      if (data.job.estado === "completed" || data.job.estado === "failed") {
-        return data.job.estado
+      if (status === "completed" || status === "failed") {
+        return status
       }
       return "continue"
     } catch (e) {
@@ -81,13 +106,13 @@ export function AnalysisTracker({ analysisId, procesoId }: AnalysisTrackerProps)
     async function startPolling() {
       const status = await poll(id)
       if (!active) return
-      if (status === "completed" || status === "failed" || status === "error") return
+      if (status === "completed" || status === "failed" || status === "error" || status === "auth_error" || status === "not_found") return
 
       interval = setInterval(async () => {
         if (!active) return
         const s = await poll(id)
         if (!active) return
-        if (s === "completed" || s === "failed" || s === "error") {
+        if (s === "completed" || s === "failed" || s === "error" || s === "auth_error" || s === "not_found") {
           clearInterval(interval!)
         }
       }, 3000)
@@ -122,7 +147,25 @@ export function AnalysisTracker({ analysisId, procesoId }: AnalysisTrackerProps)
 
   if (!analysisId) return null
 
-  if (error && !job) {
+  if (authError) {
+    return (
+      <div className="rounded-lg border border-destructive/50 p-4 text-sm text-destructive">
+        Tu sesión expiró.{" "}
+        <a href="/login" className="underline font-medium">Inicia sesión nuevamente</a>
+      </div>
+    )
+  }
+
+  if (notFound) {
+    return (
+      <div className="rounded-lg border border-destructive/50 p-4 text-sm text-destructive">
+        El análisis fue eliminado o expiró.{" "}
+        <a href="/procesos" className="underline font-medium">Volver a búsqueda</a>
+      </div>
+    )
+  }
+
+  if (error) {
     return (
       <div className="space-y-4">
         <div className="rounded-lg border border-destructive/50 p-4 text-sm text-destructive">
