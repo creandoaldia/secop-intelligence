@@ -38,8 +38,18 @@ export const BREAKER_COOLDOWN_MS = [5 * 60 * 1000, 15 * 60 * 1000, 60 * 60 * 100
 export const BREAKER_MAX_FAILURES = 3;
 export const BREAKER_RESET_SUCCESSES = 3;
 
+// ─── Helpers ────────────────────────────────────────────────
+/** Safely parse a positive integer from an env var, defaulting on invalid/missing values */
+function safeEnvInt(value: string | undefined, fallback: number): number {
+  if (value === undefined || value === "") return fallback;
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 // ─── Analysis ──────────────────────────────────────────────
-export const ANALYSIS_POLL_INTERVAL_MS = 10_000;
+export const ANALYSIS_POLL_INTERVAL_MS = safeEnvInt(process.env.ANALYSIS_POLL_INTERVAL, 10_000);
+export const ANALYSIS_RETENTION_DAYS = safeEnvInt(process.env.ANALYSIS_RETENTION_DAYS, 30);
+export const CLEANUP_INTERVAL_MS = 21_600_000;
 export const ANALYSIS_MAX_RETRIES = 3;
 export const ANALYSIS_OCR_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 export const ANALYSIS_MAX_TOKENS_OCR = 120_000;

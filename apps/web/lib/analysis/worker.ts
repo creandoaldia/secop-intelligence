@@ -13,11 +13,16 @@ import { verifyExtraction } from "@/lib/llm/verifier";
 import { logAudit } from "@/lib/audit/logger";
 import {
   ANALYSIS_POLL_INTERVAL_MS,
+  ANALYSIS_RETENTION_DAYS,
+  CLEANUP_INTERVAL_MS,
   ANALYSIS_MAX_RETRIES,
   ANALYSIS_JOB_TIMEOUT_MS,
   ANALYSIS_OCR_TIMEOUT_MS,
   ANALYSIS_MAX_TOKENS_OCR,
 } from "@/lib/constants";
+
+// ─── Env-derived config ────────────────────────────────────
+const LLM_MODEL = process.env.LLM_MODEL ?? "deepseek/deepseek-v4-flash";
 
 // ─── Types ─────────────────────────────────────────────────
 
@@ -40,21 +45,29 @@ export interface VerificationResult {
 // ─── Worker State ──────────────────────────────────────────
 
 let workerInterval: ReturnType<typeof setInterval> | null = null;
+let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
 // ─── Status Updates ────────────────────────────────────────
 
 async function updateJobStatus(
   jobId: string,
   status: string,
-  extra?: Partial<{ error: string; progress: number; pagesProcessed: number }>
+  extra?: Partial<{ error: string; progress: number; pagesProcessed: number; pagesTotal: number }>
 ): Promise<void> {
   const updateData: Record<string, unknown> = { estado: status };
   if (extra?.error) updateData.error = extra.error;
   if (extra?.progress !== undefined) {
-    updateData.paginasProcesadas = sql`CAST(${extra.progress} * paginas_total / 100 AS INTEGER)`;
+    if (extra?.pagesTotal !== undefined) {
+      updateData.paginasProcesadas = Math.floor(extra.progress * extra.pagesTotal / 100);
+    } else {
+      updateData.paginasProcesadas = sql`CAST(${extra.progress} * paginas_total / 100 AS INTEGER)`;
+    }
   }
   if (extra?.pagesProcessed !== undefined) {
     updateData.paginasProcesadas = extra.pagesProcessed;
+  }
+  if (extra?.pagesTotal !== undefined) {
+    updateData.paginasTotal = extra.pagesTotal;
   }
   await db.update(analysisJobs).set(updateData).where(eq(analysisJobs.id, jobId)).run();
 }
@@ -109,15 +122,17 @@ async function processJob(jobId: string): Promise<void> {
     await updateJobStatus(jobId, "ocr", { progress: 10 });
 
     let ocrContent: string;
+    let ocrPages = 1;
     try {
       const ocrResult = await analyzeDocumentFromUrl(pliegoUrl);
       ocrContent = ocrResult.content;
+      ocrPages = ocrResult.pages;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new Error(`OCR falló: ${msg}`);
     }
 
-    await updateJobStatus(jobId, "ocr", { progress: 35 });
+    await updateJobStatus(jobId, "ocr", { progress: 35, pagesTotal: Math.max(1, ocrPages) });
 
     // ── Step 3: LLM Extraction ───────────────────────────
     await updateJobStatus(jobId, "extracting", { progress: 40 });
@@ -164,8 +179,8 @@ async function processJob(jobId: string): Promise<void> {
       resumen: extraction.resumen,
       verificacion: verification ? JSON.stringify(verification.corrections) : null,
       confianza: verification?.confianza ?? null,
-      modeloExtraccion: "deepseek-v4-flash",
-      modeloVerificacion: "deepseek-v4-flash",
+      modeloExtraccion: LLM_MODEL,
+      modeloVerificacion: LLM_MODEL,
     }).run();
 
     await updateJobStatus(jobId, "completed", { progress: 100 });
@@ -182,7 +197,7 @@ async function processJob(jobId: string): Promise<void> {
     console.error(`[Analysis Worker] Job ${jobId} failed:`, msg);
 
     // Check retry count
-    const retryCount = job.error ? parseInt(job.error.split("|")[0] ?? "0", 10) : 0;
+    const retryCount = job.error ? (parseInt(job.error.split("|")[0], 10) || 0) : 0;
 
     if (retryCount < ANALYSIS_MAX_RETRIES - 1) {
       // Retry: reset to pending with incremented retry counter
@@ -243,15 +258,23 @@ export function startWorker(): void {
   // Immediate first poll, then interval
   pollPendingJobs();
   workerInterval = setInterval(pollPendingJobs, ANALYSIS_POLL_INTERVAL_MS);
+
+  // Cleanup old jobs on boot and then periodically
+  cleanupOldJobs();
+  cleanupInterval = setInterval(cleanupOldJobs, CLEANUP_INTERVAL_MS);
 }
 
 export function stopWorker(): void {
   if (workerInterval) {
     clearInterval(workerInterval);
     workerInterval = null;
-    isRunning = false;
-    console.log("[Analysis Worker] Stopped");
   }
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = null;
+  }
+  isRunning = false;
+  console.log("[Analysis Worker] Stopped");
 }
 
 export function isWorkerRunning(): boolean {
@@ -266,7 +289,7 @@ export async function cleanupStaleJobs(): Promise<number> {
   const result = await db.update(analysisJobs)
     .set({
       estado: "failed",
-      error: "Job cancelado por timeout (30 min sin procesar)",
+      error: `Job cancelado por timeout (${ANALYSIS_JOB_TIMEOUT_MS / 60000} min sin procesar)`,
     })
     .where(
       and(
@@ -277,4 +300,15 @@ export async function cleanupStaleJobs(): Promise<number> {
     .run();
 
   return result.changes ?? 0;
+}
+
+// ─── Retention Cleanup ────────────────────────────────────
+
+export async function cleanupOldJobs(): Promise<void> {
+  const cutoff = ANALYSIS_RETENTION_DAYS;
+  await db.run(sql`
+    DELETE FROM analysis_jobs
+    WHERE estado IN ('completed', 'failed')
+      AND created_at < unixepoch('now', '-' || ${cutoff} || ' days')
+  `);
 }
