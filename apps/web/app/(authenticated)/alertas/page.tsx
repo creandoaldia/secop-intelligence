@@ -26,6 +26,7 @@ export default function AlertasPage() {
   const [alertas, setAlertas] = useState<Alerta[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   const fetchAlertas = useCallback(async () => {
     try {
@@ -39,6 +40,7 @@ export default function AlertasPage() {
       setAlertas(json.data)
     } catch (error) {
       console.error(error)
+      setFetchError(error instanceof Error ? error.message : "Error al cargar alertas")
     } finally {
       setLoading(false)
     }
@@ -65,7 +67,6 @@ export default function AlertasPage() {
   }
 
   async function handleDelete(id: number) {
-    if (!confirm("Eliminar esta alerta?")) return
     try {
       const res = await fetch(`/api/alertas/${id}`, { method: "DELETE" })
       if (!res.ok) throw new Error("Error al eliminar alerta")
@@ -92,6 +93,20 @@ export default function AlertasPage() {
     return (
       <div className="flex items-center justify-center py-16">
         <LoaderCircleIcon className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (fetchError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Alertas"
+          description="Recibe notificaciones cuando aparezcan nuevos procesos"
+        />
+        <div className="rounded-lg border border-destructive/50 p-6 text-center text-sm text-destructive">
+          {fetchError}
+        </div>
       </div>
     )
   }

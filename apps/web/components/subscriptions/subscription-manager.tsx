@@ -2,6 +2,18 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 import {
   Card,
   CardContent,
@@ -47,9 +59,10 @@ export function SubscriptionManager({
 }: SubscriptionManagerProps) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
 
   async function handleCancel() {
-    if (!subscription || !confirm("Cancelar suscripcion? Perderas acceso a funciones premium al final del periodo.")) return;
+    if (!subscription) return;
 
     setLoading("cancel");
     try {
@@ -63,6 +76,7 @@ export function SubscriptionManager({
       router.refresh();
     } catch (err) {
       console.error("Error cancelling subscription:", err);
+      toast.error("Error al cancelar suscripcion");
     } finally {
       setLoading(null);
     }
@@ -171,22 +185,39 @@ export function SubscriptionManager({
           </Button>
 
           {subscription.status === "active" && (
-            <Button
-              variant="destructive"
-              size="sm"
-              className="w-full justify-start"
-              onClick={handleCancel}
-              disabled={loading === "cancel"}
-            >
-              {loading === "cancel" ? (
-                "Cancelando..."
-              ) : (
-                <>
-                  <XCircleIcon className="size-4" />
-                  Cancelar Suscripcion
-                </>
-              )}
-            </Button>
+            <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+              <AlertDialogTrigger>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="w-full justify-start"
+                  disabled={loading === "cancel"}
+                >
+                  {loading === "cancel" ? (
+                    "Cancelando..."
+                  ) : (
+                    <>
+                      <XCircleIcon className="size-4" />
+                      Cancelar Suscripcion
+                    </>
+                  )}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Cancelar Suscripcion</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Perderas acceso a funciones premium al final del periodo actual.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleCancel}>
+                    Confirmar Cancelacion
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
         </CardContent>
       </Card>

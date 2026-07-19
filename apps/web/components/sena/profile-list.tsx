@@ -1,6 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 import {
   Card,
   CardContent,
@@ -29,9 +41,9 @@ interface ProfileListProps {
 
 export function ProfileList({ profiles }: ProfileListProps) {
   const router = useRouter();
+  const [deleteProfileId, setDeleteProfileId] = useState<number | null>(null);
 
   async function handleDelete(id: number) {
-    if (!confirm("Eliminar este perfil?")) return;
 
     try {
       const res = await fetch(`/api/sena/profiles/${id}`, {
@@ -101,15 +113,33 @@ export function ProfileList({ profiles }: ProfileListProps) {
             </div>
           </CardContent>
           <CardFooter>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-destructive"
-              onClick={() => handleDelete(profile.id)}
-            >
-              <Trash2Icon className="size-3" />
-              Eliminar
-            </Button>
+            <AlertDialog open={deleteProfileId === profile.id} onOpenChange={(open) => !open && setDeleteProfileId(null)}>
+              <AlertDialogTrigger>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive"
+                  onClick={() => setDeleteProfileId(profile.id)}
+                >
+                  <Trash2Icon className="size-3" />
+                  Eliminar
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Eliminar Perfil</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Este perfil se eliminara permanentemente.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => deleteProfileId !== null && handleDelete(deleteProfileId)}>
+                    Eliminar
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </CardFooter>
         </Card>
       ))}

@@ -1,7 +1,19 @@
 "use client"
 
+import { useState } from "react"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog"
 import { Trash2Icon, BellIcon } from "lucide-react"
 
 interface Alerta {
@@ -39,6 +51,13 @@ function formatDate(ts: number | null): string {
 }
 
 export function AlertList({ alertas, onToggle, onDelete }: AlertListProps) {
+  const [deleteAlertId, setDeleteAlertId] = useState<number | null>(null)
+  const palabrasClaves = alertas.map(a => {
+    try {
+      const parsed = JSON.parse(a.palabrasClave ?? "[]")
+      return Array.isArray(parsed) ? parsed : []
+    } catch { return [] }
+  })
   if (alertas.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -55,7 +74,7 @@ export function AlertList({ alertas, onToggle, onDelete }: AlertListProps) {
 
   return (
     <div className="space-y-3">
-      {alertas.map((alerta) => (
+      {alertas.map((alerta, index) => (
         <div
           key={alerta.id}
           className="flex items-start justify-between rounded-lg border p-4"
@@ -70,8 +89,8 @@ export function AlertList({ alertas, onToggle, onDelete }: AlertListProps) {
               )}
             </div>
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              {alerta.palabrasClave && (
-                <span>Claves: {JSON.parse(alerta.palabrasClave).join(", ")}</span>
+              {alerta.palabrasClave && palabrasClaves[index]?.length > 0 && (
+                <span>Claves: {palabrasClaves[index].join(", ")}</span>
               )}
               {alerta.departamento && <span>Dpto: {alerta.departamento}</span>}
               {alerta.valorMin != null && (
@@ -95,14 +114,32 @@ export function AlertList({ alertas, onToggle, onDelete }: AlertListProps) {
               checked={alerta.activa}
               onCheckedChange={(checked) => onToggle(alerta.id, checked)}
             />
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => onDelete(alerta.id)}
-              className="text-destructive hover:text-destructive"
-            >
-              <Trash2Icon className="size-4" />
-            </Button>
+            <AlertDialog open={deleteAlertId === alerta.id} onOpenChange={(open) => !open && setDeleteAlertId(null)}>
+              <AlertDialogTrigger>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setDeleteAlertId(alerta.id)}
+                  className="text-destructive hover:text-destructive"
+                >
+                  <Trash2Icon className="size-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Eliminar Alerta</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Esta accion no se puede deshacer.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => deleteAlertId !== null && onDelete(deleteAlertId)}>
+                    Eliminar
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
       ))}
