@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { procesos } from "@/lib/db/schema";
+import { procesos, sourceHealth } from "@/lib/db/schema";
 import { rateLimitMiddleware } from "@/lib/security/rate-limit";
 import {
   like,
@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
         ? asc(column)
         : desc(column);
 
-    const [data, totalResult] = await Promise.all([
+    const [data, totalResult, health] = await Promise.all([
       db
         .select()
         .from(procesos)
@@ -99,6 +99,7 @@ export async function GET(request: NextRequest) {
         .offset(offset)
         .all(),
       db.select({ value: count() }).from(procesos).where(where).get(),
+      db.select().from(sourceHealth).where(eq(sourceHealth.source, "socrata")).get(),
     ]);
 
     const total = totalResult?.value ?? 0;
@@ -109,6 +110,10 @@ export async function GET(request: NextRequest) {
       page,
       pageSize,
       pages: Math.ceil(total / pageSize),
+      ultima_sincronizacion: health?.lastSuccessAt ?? null,
+      advertencia_datos_desactualizados: health?.status === "down"
+        ? "La fuente Socrata no esta disponible; los datos mostrados pueden estar desactualizados."
+        : null,
     });
   } catch (error) {
     console.error("Error fetching procesos:", error);

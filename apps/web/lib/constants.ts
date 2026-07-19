@@ -34,6 +34,9 @@ export const SYNC_STALE_TIMEOUT_MINUTES = 10;
 export const SYNC_POLL_INTERVAL_MS = 10_000;
 export const SYNC_JOB_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 export const ANALYSIS_JOB_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+export const BREAKER_COOLDOWN_MS = [5 * 60 * 1000, 15 * 60 * 1000, 60 * 60 * 1000, 3 * 60 * 60 * 1000];
+export const BREAKER_MAX_FAILURES = 3;
+export const BREAKER_RESET_SUCCESSES = 3;
 
 // ─── Analysis ──────────────────────────────────────────────
 export const ANALYSIS_POLL_INTERVAL_MS = 10_000;

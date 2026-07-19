@@ -96,6 +96,13 @@ export class SocrataNetworkError extends SocrataError {
   }
 }
 
+export class SocrataCircuitOpenError extends SocrataError {
+  constructor(public readonly cooldownUntil: Date) {
+    super(`Socrata circuit breaker is open until ${cooldownUntil.toISOString()}`);
+    this.name = "SocrataCircuitOpenError";
+  }
+}
+
 export class SyncStallError extends SocrataError {
   constructor(
     message: string,
@@ -116,6 +123,31 @@ export interface SocrataClientConfig {
   delayMs: number;
   jitterPct: number;
   maxRetryAfterSeconds: number;
+}
+
+// ─── Source Health ──────────────────────────────────────────
+
+export type SourceStatus = "healthy" | "degraded" | "down";
+
+export interface SourceHealthRow {
+  source: string;
+  status: SourceStatus;
+  consecutiveFailures: number;
+  consecutiveSuccesses: number;
+  breakerTripCount: number;
+  cooldownUntil: Date | null;
+  watermarkDate: string | null;
+  watermarkId: string | null;
+  lastSuccessAt: Date | null;
+  lastFailureAt: Date | null;
+  lastErrorMessage: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SocrataPageOptions {
+  where?: string;
+  order?: string;
 }
 
 // ─── Sync Types ────────────────────────────────────────────

@@ -5,9 +5,20 @@ import {
   SocrataRateLimitError,
   SocrataTimeoutError,
   SocrataNetworkError,
+  SocrataCircuitOpenError,
   SocrataClientConfig,
+  SocrataPageOptions,
 } from "./types";
-import { SOCRATA_TIMEOUT_MS, PAGE_SIZE_SOCRATA, SOCRATA_MAX_CONCURRENCY } from "@/lib/constants";
+import { db } from "@/lib/db";
+import { sourceHealth } from "@/lib/db/schema";
+import { eq, sql } from "drizzle-orm";
+import {
+  BREAKER_COOLDOWN_MS,
+  BREAKER_MAX_FAILURES,
+  BREAKER_RESET_SUCCESSES,
+  PAGE_SIZE_SOCRATA,
+  SOCRATA_TIMEOUT_MS,
+} from "@/lib/constants";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -36,6 +47,7 @@ export class SocrataClient {
   private maxRetryAfterSeconds: number;
   private lastRequestStart: number = 0;
   private requestQueue: Promise<void> = Promise.resolve();
+  private readonly source = "socrata";
 
   constructor(config: SocrataClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/+$/, "");
@@ -51,12 +63,23 @@ export class SocrataClient {
   async fetchPage(
     offset: number,
     limit: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    options: SocrataPageOptions = {}
   ): Promise<SocrataProcessRow[]> {
+    if (!await this.isHealthy()) {
+      const health = await db.select().from(sourceHealth).where(eq(sourceHealth.source, this.source)).get();
+      throw new SocrataCircuitOpenError(health?.cooldownUntil ?? new Date());
+    }
+
     // Enforce max page size
     const cappedLimit = Math.min(limit, PAGE_SIZE_SOCRATA);
-
-    const url = `${this.baseUrl}/${this.datasetId}.json?$limit=${cappedLimit}&$offset=${offset}&$order=:id`;
+    const query = new URLSearchParams({
+      "$limit": String(cappedLimit),
+      "$offset": String(offset),
+      "$order": options.order ?? ":id",
+    });
+    if (options.where) query.set("$where", options.where);
+    const url = `${this.baseUrl}/${this.datasetId}.json?${query.toString()}`;
 
     // Serialize via queue (concurrency=1)
     return new Promise<SocrataProcessRow[]>((resolve, reject) => {
@@ -70,6 +93,73 @@ export class SocrataClient {
         }
       });
     });
+  }
+
+  async isHealthy(): Promise<boolean> {
+    await db.insert(sourceHealth).values({ source: this.source }).onConflictDoNothing().run();
+    const health = await db.select().from(sourceHealth).where(eq(sourceHealth.source, this.source)).get();
+    return health?.status !== "down" || !health.cooldownUntil || health.cooldownUntil <= new Date();
+  }
+
+  async reportSuccess(): Promise<void> {
+    await db.run(sql`
+      INSERT INTO source_health (
+        source, status, consecutive_failures, consecutive_successes, breaker_trip_count,
+        last_success_at, created_at, updated_at
+      ) VALUES (${this.source}, 'healthy', 0, 1, 0, unixepoch(), unixepoch(), unixepoch())
+      ON CONFLICT(source) DO UPDATE SET
+        status = 'healthy',
+        consecutive_failures = 0,
+        consecutive_successes = CASE
+          WHEN source_health.consecutive_successes + 1 >= ${BREAKER_RESET_SUCCESSES} THEN 0
+          ELSE source_health.consecutive_successes + 1
+        END,
+        breaker_trip_count = CASE
+          WHEN source_health.consecutive_successes + 1 >= ${BREAKER_RESET_SUCCESSES} THEN 0
+          ELSE source_health.breaker_trip_count
+        END,
+        cooldown_until = NULL,
+        last_success_at = unixepoch(),
+        updated_at = unixepoch()
+    `);
+  }
+
+  async reportFailure(error: SocrataApiError): Promise<void> {
+    if (error.statusCode < 500 || error.statusCode >= 600) return;
+
+    await db.run(sql`
+      INSERT INTO source_health (
+        source, status, consecutive_failures, consecutive_successes, breaker_trip_count,
+        last_failure_at, last_error_message, created_at, updated_at
+      ) VALUES (${this.source}, 'degraded', 1, 0, 0, unixepoch(), ${error.message}, unixepoch(), unixepoch())
+      ON CONFLICT(source) DO UPDATE SET
+        status = CASE
+          WHEN source_health.consecutive_failures + 1 >= ${BREAKER_MAX_FAILURES} THEN 'down'
+          ELSE 'degraded'
+        END,
+        consecutive_failures = source_health.consecutive_failures + 1,
+        consecutive_successes = 0,
+        breaker_trip_count = CASE
+          WHEN source_health.consecutive_failures < ${BREAKER_MAX_FAILURES}
+            AND source_health.consecutive_failures + 1 >= ${BREAKER_MAX_FAILURES}
+          THEN source_health.breaker_trip_count + 1
+          ELSE source_health.breaker_trip_count
+        END,
+        cooldown_until = CASE
+          WHEN source_health.consecutive_failures < ${BREAKER_MAX_FAILURES}
+            AND source_health.consecutive_failures + 1 >= ${BREAKER_MAX_FAILURES}
+          THEN unixepoch() + CASE source_health.breaker_trip_count + 1
+            WHEN 1 THEN ${BREAKER_COOLDOWN_MS[0] / 1000}
+            WHEN 2 THEN ${BREAKER_COOLDOWN_MS[1] / 1000}
+            WHEN 3 THEN ${BREAKER_COOLDOWN_MS[2] / 1000}
+            ELSE ${BREAKER_COOLDOWN_MS[3] / 1000}
+          END
+          ELSE source_health.cooldown_until
+        END,
+        last_failure_at = unixepoch(),
+        last_error_message = ${error.message},
+        updated_at = unixepoch()
+    `);
   }
 
   // ─── Internal: rate-limited fetch with retry ────────────
@@ -153,11 +243,13 @@ export class SocrataClient {
       // Non-429 errors: fail immediately (no retry)
       let body: string | undefined;
       try { body = await response.text(); } catch { /* ignore */ }
-      throw new SocrataApiError(
+      const error = new SocrataApiError(
         `Socrata API error: ${response.status} ${response.statusText}`,
         response.status,
         body
       );
+      await this.reportFailure(error);
+      throw error;
     }
 
     // Success

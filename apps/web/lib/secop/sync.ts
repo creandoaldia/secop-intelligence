@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { procesos, syncLog, entidades } from "@/lib/db/schema";
+import { procesos, syncLog, entidades, sourceHealth } from "@/lib/db/schema";
 import { eq, sql, and, inArray } from "drizzle-orm";
 import { SocrataClient } from "./client";
 import {
@@ -12,6 +12,7 @@ import {
   SocrataRateLimitError,
   SocrataNetworkError,
   SocrataTimeoutError,
+  SocrataCircuitOpenError,
   SyncStallError,
   SyncResult,
   SyncConfig,
@@ -21,7 +22,6 @@ import {
   PAGE_SIZE_SOCRATA,
   SYNC_STALL_THRESHOLD,
   SYNC_STALE_TIMEOUT_MINUTES,
-  SYNC_MAX_RETRIES,
 } from "@/lib/constants";
 
 // ─── Public API ────────────────────────────────────────────
@@ -33,60 +33,49 @@ export async function runSync(
   const pageSize = Math.min(config.pageSize ?? PAGE_SIZE_SOCRATA, PAGE_SIZE_SOCRATA);
   const stallThreshold = config.stallThreshold ?? SYNC_STALL_THRESHOLD;
 
-  // Check if sync already running (with stale detection)
-  const runningSync = await db
-    .select()
-    .from(syncLog)
-    .where(
-      and(
-        eq(syncLog.fuente, "socrata"),
-        eq(syncLog.estado, "running")
-      )
+  // Release abandoned leases before atomically claiming the next one.
+  await db
+    .update(syncLog)
+    .set({ estado: "error", fechaFin: new Date() })
+    .where(and(
+      eq(syncLog.fuente, "socrata"),
+      eq(syncLog.estado, "running"),
+      sql`${syncLog.fechaInicio} < unixepoch() - ${SYNC_STALE_TIMEOUT_MINUTES * 60}`
+    ))
+    .run();
+
+  const lease = await db.run(sql`
+    INSERT INTO sync_log (fuente, estado, fecha_inicio, metricas)
+    SELECT 'socrata', 'running', unixepoch(), ${JSON.stringify({ lastProcessedOffset: 0 })}
+    WHERE NOT EXISTS (
+      SELECT 1 FROM sync_log WHERE fuente = 'socrata' AND estado = 'running'
     )
-    .orderBy(syncLog.fechaInicio)
+  `);
+
+  if (lease.changes === 0) return alreadyRunningResult();
+
+  const leaseRow = await db
+    .select({ id: syncLog.id })
+    .from(syncLog)
+    .where(and(eq(syncLog.fuente, "socrata"), eq(syncLog.estado, "running")))
+    .orderBy(sql`${syncLog.id} DESC`)
     .get();
 
-  if (runningSync) {
-    const elapsed = Math.floor(
-      (Date.now() / 1000) - new Date(runningSync.fechaInicio).getTime() / 1000
-    );
-    if (elapsed < SYNC_STALE_TIMEOUT_MINUTES * 60) {
-      return {
-        status: "already_running",
-        nuevos: 0,
-        actualizados: 0,
-        errores: 0,
-        metricas: {
-          lastProcessedOffset: 0,
-          totalRequests: 0,
-          rateLimitHits: 0,
-          retriesTriggered: 0,
-          totalWaitTimeMs: 0,
-          avgRequestTimeMs: 0,
-          newIdsSeenSample: [],
-          consecutiveStalePages: 0,
-        },
-      };
-    }
-    // Stale running entry: mark as error so we can resume
-    await db
-      .update(syncLog)
-      .set({
-        estado: "error",
-        fechaFin: new Date(),
-        metricas: JSON.stringify({
-          lastProcessedOffset: runningSync.metricas
-            ? (JSON.parse(runningSync.metricas) as SyncMetrics).lastProcessedOffset ?? 0
-            : 0,
-        }),
-      })
-      .where(eq(syncLog.id, runningSync.id))
-      .run();
-  }
+  if (!leaseRow) return alreadyRunningResult();
 
   // Determine start offset
   let startOffset = 0;
-  if (config.mode === "full") {
+  const health = await db
+    .select()
+    .from(sourceHealth)
+    .where(eq(sourceHealth.source, "socrata"))
+    .get();
+  const cursor = health?.watermarkDate && health.watermarkId
+    ? { date: health.watermarkDate, id: health.watermarkId }
+    : null;
+  const incremental = config.mode === "incremental" && cursor !== null;
+
+  if (!incremental) {
     // Check for interrupted sync to resume
     const lastError = await db
       .select()
@@ -106,41 +95,13 @@ export async function runSync(
         startOffset = metrics.lastProcessedOffset || 0;
       } catch { /* use default 0 */ }
     }
-  } else {
-    // Incremental: check for previous completed sync
-    const lastDone = await db
-      .select()
-      .from(syncLog)
-      .where(
-        and(
-          eq(syncLog.fuente, "socrata"),
-          eq(syncLog.estado, "done")
-        )
-      )
-      .orderBy(sql`${syncLog.fechaInicio} DESC`)
-      .get();
-
-    if (!lastDone) {
-      // No prior sync: fall back to full mode
-      return runSync(client, { ...config, mode: "full" });
-    }
-    // Incremental uses $where time filter, handled in fetch URL
-    // The client doesn't need offset for incremental — we use $where
   }
 
-  // Create sync log entry
-  const now = new Date();
-  const nowUnix = Math.floor(Date.now() / 1000);
-  const syncId = (await db
-    .insert(syncLog)
-    .values({
-      fuente: "socrata",
-      fechaInicio: now,
-      estado: "running",
-      metricas: JSON.stringify({ lastProcessedOffset: startOffset }),
-    })
-    .returning({ id: syncLog.id })
-    .get()).id;
+  const syncId = leaseRow.id;
+  const pageOptions = {
+    ...(incremental && cursor ? { where: compoundWatermarkWhere(cursor.date, cursor.id) } : {}),
+    order: "fecha_de_publicacion_del ASC, id_del_proceso ASC",
+  };
 
   // Sync metrics
   const metrics: SyncMetrics = {
@@ -169,7 +130,7 @@ export async function runSync(
       let rows: SocrataProcessRow[];
 
       try {
-        rows = await client.fetchPage(offset, pageSize, config.signal);
+        rows = await client.fetchPage(offset, pageSize, config.signal, pageOptions);
         metrics.totalRequests++;
         metrics.avgRequestTimeMs = metrics.avgRequestTimeMs === 0
           ? (Date.now() - requestStart)
@@ -317,10 +278,16 @@ export async function runSync(
       // Persist checkpoint after each page
       await updateSyncLog(syncId, "running", metrics, nuevos, actualizados, errores);
 
+      const lastRow = rows[rows.length - 1];
+      if (lastRow?.fecha_de_publicacion_del && lastRow.id_del_proceso) {
+        await updateWatermark(lastRow.fecha_de_publicacion_del, lastRow.id_del_proceso);
+      }
+
       offset += pageSize;
     }
 
     // Success
+    await client.reportSuccess();
     await db
       .update(syncLog)
       .set({
@@ -343,6 +310,10 @@ export async function runSync(
     };
 
   } catch (err) {
+    if (err instanceof SocrataCircuitOpenError) {
+      await updateSyncLog(syncId, "error", metrics, nuevos, actualizados, errores);
+      return { status: "error", nuevos, actualizados, errores, metricas: metrics, error: err.message };
+    }
     if (err instanceof SyncStallError) {
       await updateSyncLog(syncId, "stalled", metrics, nuevos, actualizados, errores);
       return { status: "stalled", nuevos, actualizados, errores, metricas: metrics, error: err.message };
@@ -359,6 +330,42 @@ export async function runSync(
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+function alreadyRunningResult(): SyncResult {
+  return {
+    status: "already_running",
+    nuevos: 0,
+    actualizados: 0,
+    errores: 0,
+    metricas: {
+      lastProcessedOffset: 0,
+      totalRequests: 0,
+      rateLimitHits: 0,
+      retriesTriggered: 0,
+      totalWaitTimeMs: 0,
+      avgRequestTimeMs: 0,
+      newIdsSeenSample: [],
+      consecutiveStalePages: 0,
+    },
+  };
+}
+
+export function compoundWatermarkWhere(date: string, id: string): string {
+  const quotedDate = date.replace(/'/g, "''");
+  const quotedId = id.replace(/'/g, "''");
+  return `fecha_de_publicacion_del >= '${quotedDate}' AND (fecha_de_publicacion_del > '${quotedDate}' OR id_del_proceso > '${quotedId}')`;
+}
+
+async function updateWatermark(date: string, id: string): Promise<void> {
+  await db
+    .insert(sourceHealth)
+    .values({ source: "socrata", watermarkDate: date, watermarkId: id })
+    .onConflictDoUpdate({
+      target: sourceHealth.source,
+      set: { watermarkDate: date, watermarkId: id, updatedAt: new Date() },
+    })
+    .run();
 }
 
 // ─── Helpers ───────────────────────────────────────────────

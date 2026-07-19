@@ -235,6 +235,26 @@ export const syncLog = sqliteTable("sync_log", {
   // Si estado="running" y fecha_inicio es >10 min sin fechaFin, tratarlo como "error" (stale detection)
 });
 
+// ─── SOURCE HEALTH ─────────────────────────────────────────
+
+export const sourceHealth = sqliteTable("source_health", {
+  source: text("source").primaryKey(),
+  status: text("status", { enum: ["healthy", "degraded", "down"] }).default("healthy").notNull(),
+  consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
+  consecutiveSuccesses: integer("consecutive_successes").default(0).notNull(),
+  breakerTripCount: integer("breaker_trip_count").default(0).notNull(),
+  cooldownUntil: integer("cooldown_until", { mode: "timestamp" }),
+  watermarkDate: text("watermark_date"),
+  watermarkId: text("watermark_id"),
+  lastSuccessAt: integer("last_success_at", { mode: "timestamp" }),
+  lastFailureAt: integer("last_failure_at", { mode: "timestamp" }),
+  lastErrorMessage: text("last_error_message"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .default(sql`(strftime('%s','now'))`).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .default(sql`(strftime('%s','now'))`).notNull(),
+});
+
 // ─── FEEDBACK ───────────────────────────────────────────────
 
 export const feedback = sqliteTable("feedback", {
