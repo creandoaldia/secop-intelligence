@@ -11,9 +11,12 @@ import {
   CreditCard,
   Users,
   Settings,
+  Shield,
+  Menu,
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useMemo } from "react";
 import {
   Sheet,
   SheetContent,
@@ -28,20 +31,28 @@ interface SidebarProps {
     name?: string | null;
     email?: string | null;
     plan?: string | null;
+    role?: string | null;
   };
 }
 
-const navLinks = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/procesos", label: "Procesos", icon: FileSearch },
-  { href: "/pac", label: "PAC", icon: CalendarCheck },
-  { href: "/alertas", label: "Alertas", icon: Bell },
-  { href: "/planes", label: "Planes", icon: CreditCard },
-  { href: "/sena", label: "SENA", icon: Users },
-  { href: "/perfil", label: "Perfil", icon: Settings },
-];
+function getNavLinks(user: SidebarProps["user"]) {
+  const links = [
+    { href: "/", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/procesos", label: "Procesos", icon: FileSearch },
+    { href: "/pac", label: "PAC", icon: CalendarCheck },
+    { href: "/alertas", label: "Alertas", icon: Bell },
+    { href: "/planes", label: "Planes", icon: CreditCard },
+    { href: "/sena", label: "SENA", icon: Users },
+    { href: "/perfil", label: "Perfil", icon: Settings },
+  ]
+  if (user?.role === "admin") {
+    links.push({ href: "/admin/sync", label: "Admin", icon: Shield })
+  }
+  return links
+}
 
-function NavContent({ pathname }: { pathname: string }) {
+function NavContent({ pathname, user }: { pathname: string; user: SidebarProps["user"] }) {
+  const navLinks = useMemo(() => getNavLinks(user), [user])
   return (
     <nav className="flex flex-1 flex-col gap-1 px-3">
       {navLinks.map((link) => {
@@ -69,7 +80,7 @@ function NavContent({ pathname }: { pathname: string }) {
   );
 }
 
-function SidebarDesktop({ pathname }: { pathname: string }) {
+function SidebarDesktop({ pathname, user }: { pathname: string; user: SidebarProps["user"] }) {
   return (
     <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0 bg-sidebar border-r border-sidebar-border">
       <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-6">
@@ -79,7 +90,7 @@ function SidebarDesktop({ pathname }: { pathname: string }) {
         </span>
       </div>
       <div className="flex flex-1 flex-col py-4">
-        <NavContent pathname={pathname} />
+        <NavContent pathname={pathname} user={user} />
       </div>
     </aside>
   );
@@ -91,12 +102,12 @@ export function Sidebar({ user }: SidebarProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <SidebarDesktop pathname={pathname} />
+      <SidebarDesktop pathname={pathname} user={user} />
 
       {/* Mobile sheet */}
       <Sheet>
         <SheetTrigger className="lg:hidden">
-          <span />
+          <Menu className="size-5" />
         </SheetTrigger>
         <SheetContent side="left" className="w-64 p-0 bg-sidebar">
           <SheetHeader className="flex h-14 flex-row items-center gap-2 border-b border-sidebar-border px-6">
@@ -119,7 +130,7 @@ export function Sidebar({ user }: SidebarProps) {
             </SheetClose>
           </SheetHeader>
           <div className="flex flex-1 flex-col py-4">
-            <NavContent pathname={pathname} />
+            <NavContent pathname={pathname} user={user} />
           </div>
         </SheetContent>
       </Sheet>
