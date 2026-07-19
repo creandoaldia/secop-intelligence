@@ -298,8 +298,10 @@ export class SecopDownloadClient {
       const checkOk = !hasError && !stillCaptcha;
 
       if (!checkOk) {
-        console.log(`[SECOP Download] CaptchaCheck response (HTTP ${checkRes.status}):`);
-        console.log(`  body snippet: ${checkBody.slice(0, 300)}`);
+        // checkRes y checkBody solo existen dentro del try-catch anterior (block-scoped)
+        // Para reportar el error usamos checkResult en su lugar
+        console.log(`[SECOP Download] CaptchaCheck fallo. HTTP y body en checkResult.`);
+        console.log(`  body snippet: ${checkResult.html.slice(0, 300)}`);
       }
 
       tracker.reportCaptchaCheck(recordId, checkOk);
@@ -307,7 +309,7 @@ export class SecopDownloadClient {
 
       if (!checkOk) {
         throw new Error(
-          `CaptchaCheck fallo (HTTP ${checkRes.status}). ` +
+          `CaptchaCheck fallo para pagina de proceso. ` +
           `El token de 2captcha pudo expirar o la URL es incorrecta.`
         );
       }

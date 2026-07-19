@@ -98,7 +98,7 @@ export class CaptchaTracker {
           const m = JSON.parse(row.metadata);
           this.records.push({
             id: row.entityId ?? crypto.randomUUID(),
-            timestamp: new Date((row.createdAt as number) * 1000).toISOString(),
+            timestamp: new Date(Number(row.createdAt ?? 0) * 1000).toISOString(),
             type: m.type ?? "recaptcha_v2",
             durationMs: m.durationMs ?? 0,
             solved: m.solved ?? false,
