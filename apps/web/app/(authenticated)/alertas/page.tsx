@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
+import { PageHeader } from "@/components/shared/page-header"
 import { Button } from "@/components/ui/button"
 import { AlertList } from "@/components/alertas/alert-list"
 import { AlertForm, type AlertFormData } from "@/components/alertas/alert-form"
@@ -97,18 +98,16 @@ export default function AlertasPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold">Alertas</h1>
-          <p className="text-sm text-muted-foreground">
-            Recibe notificaciones cuando aparezcan nuevos procesos
-          </p>
-        </div>
-        <Button onClick={() => setDialogOpen(true)}>
-          <PlusIcon className="size-4" />
-          Nueva Alerta
-        </Button>
-      </div>
+      <PageHeader
+        title="Alertas"
+        description="Recibe notificaciones cuando aparezcan nuevos procesos"
+        action={
+          <Button onClick={() => setDialogOpen(true)}>
+            <PlusIcon className="size-4" />
+            Nueva Alerta
+          </Button>
+        }
+      />
 
       <AlertList
         alertas={alertas}

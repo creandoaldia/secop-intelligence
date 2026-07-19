@@ -3,9 +3,9 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { PageHeader } from "@/components/shared/page-header";
 import { ConnectButton } from "@/components/linkedin/connect-button";
 import { ConnectedStatus } from "@/components/linkedin/connected-status";
-import { SettingsIcon } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -30,15 +30,10 @@ export default async function PerfilPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold flex items-center gap-2">
-          <SettingsIcon className="size-5" />
-          Perfil
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Configuracion de tu cuenta y conexiones
-        </p>
-      </div>
+      <PageHeader
+        title="Perfil"
+        description="Configuracion de tu cuenta y conexiones"
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4">

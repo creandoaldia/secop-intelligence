@@ -1,6 +1,7 @@
 import { Suspense } from "react"
 import { auth } from "@/lib/auth"
 import { redirect } from "next/navigation"
+import { PageHeader } from "@/components/shared/page-header"
 import { SearchBar } from "@/components/procesos/search-bar"
 import { FilterPanel } from "@/components/procesos/filter-panel"
 import { ProcesosTable } from "@/components/procesos/procesos-table"
@@ -50,12 +51,7 @@ export default async function ProcesosPage({ searchParams }: PageProps) {
   } catch {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-lg font-semibold">Procesos</h1>
-          <p className="text-sm text-muted-foreground">
-            Explora y busca procesos de contratacion publica
-          </p>
-        </div>
+        <PageHeader title="Procesos" description="Explora y busca procesos de contratacion publica" />
         <div className="rounded-lg border border-destructive/50 p-6 text-center text-sm text-destructive">
           Error al cargar procesos. Intenta de nuevo.
         </div>
@@ -65,12 +61,7 @@ export default async function ProcesosPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold">Procesos</h1>
-        <p className="text-sm text-muted-foreground">
-          Explora y busca procesos de contratacion publica
-        </p>
-      </div>
+      <PageHeader title="Procesos" description="Explora y busca procesos de contratacion publica" />
 
       <div className="flex flex-col gap-4">
         <Suspense fallback={null}>

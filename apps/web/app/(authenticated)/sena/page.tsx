@@ -3,9 +3,9 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { senaProfiles } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { PageHeader } from "@/components/shared/page-header";
 import { ProfileList } from "@/components/sena/profile-list";
 import { ProfileForm } from "@/components/sena/profile-form";
-import { UsersIcon } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -27,18 +27,11 @@ export default async function SenaPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold flex items-center gap-2">
-            <UsersIcon className="size-5" />
-            Perfiles SENA
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Gestiona los perfiles de aprendices SENA para matching con procesos
-          </p>
-        </div>
-        <ProfileForm />
-      </div>
+      <PageHeader
+        title="Perfiles SENA"
+        description="Gestiona los perfiles de aprendices SENA para matching con procesos"
+        action={<ProfileForm />}
+      />
 
       <ProfileList profiles={parsed} />
     </div>

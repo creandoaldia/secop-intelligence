@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 import { db } from "@/lib/db"
 import { pacItems } from "@/lib/db/schema"
 import { eq, and, asc } from "drizzle-orm"
+import { PageHeader } from "@/components/shared/page-header"
 import {
   Card,
   CardContent,
@@ -69,17 +70,10 @@ export default async function PacPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold">
-            Plan Anual de Adquisiciones
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {anno} — {items.length} item{items.length !== 1 ? "s" : ""} ·{" "}
-            {formatCOP(totalValor)} presupuestado
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Plan Anual de Adquisiciones"
+        description={`${anno} — ${items.length} item${items.length !== 1 ? "s" : ""} \u00B7 ${formatCOP(totalValor)} presupuestado`}
+      />
 
       {items.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
