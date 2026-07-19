@@ -4,7 +4,6 @@ import { db } from "@/lib/db";
 import { procesos, sourceHealth } from "@/lib/db/schema";
 import { rateLimitMiddleware } from "@/lib/security/rate-limit";
 import {
-  like,
   and,
   gte,
   lte,
@@ -13,6 +12,7 @@ import {
   desc,
   asc,
   count,
+  sql,
   type AnyColumn,
 } from "drizzle-orm";
 
@@ -30,6 +30,19 @@ type SortableColumn = (typeof SORTABLE_COLUMNS)[keyof typeof SORTABLE_COLUMNS];
 
 function isSortableColumn(col: string): col is SortableColumn {
   return Object.values(SORTABLE_COLUMNS).includes(col as SortableColumn);
+}
+
+function sanitizeFts5(query: string): string {
+  let s = query.replace(/\b(AND|OR|NOT|NEAR)\b/gi, ' ');
+  s = s.replace(/[*()"'+\-~^]/g, ' ');
+  s = s.replace(/'/g, "''");
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '';
+  return words.map(w => `"${w}"`).join(' ');
+}
+
+function sanitizeLike(query: string): string {
+  return query.replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 export async function GET(request: NextRequest) {
@@ -64,15 +77,25 @@ export async function GET(request: NextRequest) {
   const sortBy = isSortableColumn(sortByRaw) ? sortByRaw : "fechaPublicacion";
 
   try {
-    const conditions: ReturnType<typeof eq>[] = [];
+    const conditions: any[] = [];
+    let useFts = false;
 
     if (q) {
-      conditions.push(
-        or(
-          like(procesos.nombre, `%${q}%`),
-          like(procesos.entidadNombre, `%${q}%`)
-        ) as ReturnType<typeof eq>
-      );
+      const ftsQuery = sanitizeFts5(q);
+      if (ftsQuery) {
+        conditions.push(
+          sql`EXISTS (SELECT 1 FROM procesos_fts WHERE procesos_fts MATCH ${ftsQuery} AND procesos_fts.rowid = ${procesos.id})`
+        );
+        useFts = true;
+      } else {
+        const likeQ = sanitizeLike(q);
+        conditions.push(
+          or(
+            sql`${procesos.nombre} LIKE '%' || ${likeQ} || '%' ESCAPE '\\'`,
+            sql`${procesos.entidadNombre} LIKE '%' || ${likeQ} || '%' ESCAPE '\\'`
+          ) as any
+        );
+      }
     }
     if (estado) conditions.push(eq(procesos.estado, estado));
     if (modalidad) conditions.push(eq(procesos.modalidad, modalidad));
@@ -89,20 +112,59 @@ export async function GET(request: NextRequest) {
         ? asc(column)
         : desc(column);
 
-    const [data, totalResult, health] = await Promise.all([
-      db
-        .select()
-        .from(procesos)
-        .where(where)
-        .orderBy(orderBy)
-        .limit(pageSize)
-        .offset(offset)
-        .all(),
-      db.select({ value: count() }).from(procesos).where(where).get(),
-      db.select().from(sourceHealth).where(eq(sourceHealth.source, "socrata")).get(),
-    ]);
+    let data: any[];
+    let total: number;
+    let health: any;
 
-    const total = totalResult?.value ?? 0;
+    try {
+      const result = await Promise.all([
+        db
+          .select()
+          .from(procesos)
+          .where(where)
+          .orderBy(orderBy)
+          .limit(pageSize)
+          .offset(offset)
+          .all(),
+        db.select({ value: count() }).from(procesos).where(where).get(),
+        db.select().from(sourceHealth).where(eq(sourceHealth.source, "socrata")).get(),
+      ]);
+      data = result[0] as any[];
+      total = (result[1] as any)?.value ?? 0;
+      health = result[2];
+    } catch (queryErr) {
+      if (!useFts) throw queryErr;
+
+      const likeQ = sanitizeLike(q);
+      const fbConditions: any[] = [
+        or(
+          sql`${procesos.nombre} LIKE '%' || ${likeQ} || '%' ESCAPE '\\'`,
+          sql`${procesos.entidadNombre} LIKE '%' || ${likeQ} || '%' ESCAPE '\\'`
+        ) as any,
+      ];
+      if (estado) fbConditions.push(eq(procesos.estado, estado));
+      if (modalidad) fbConditions.push(eq(procesos.modalidad, modalidad));
+      if (departamento) fbConditions.push(eq(procesos.departamento, departamento));
+      if (valorMin) fbConditions.push(gte(procesos.valor, parseInt(valorMin)));
+      if (valorMax) fbConditions.push(lte(procesos.valor, parseInt(valorMax)));
+      const fbWhere = and(...fbConditions);
+
+      const result = await Promise.all([
+        db
+          .select()
+          .from(procesos)
+          .where(fbWhere)
+          .orderBy(orderBy)
+          .limit(pageSize)
+          .offset(offset)
+          .all(),
+        db.select({ value: count() }).from(procesos).where(fbWhere).get(),
+        db.select().from(sourceHealth).where(eq(sourceHealth.source, "socrata")).get(),
+      ]);
+      data = result[0] as any[];
+      total = (result[1] as any)?.value ?? 0;
+      health = result[2];
+    }
 
     return NextResponse.json({
       data,
