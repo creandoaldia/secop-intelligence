@@ -2,10 +2,11 @@ import { auth } from "@/lib/auth"
 import { canUseFeature, hasPagesRemaining } from "@/lib/auth"
 import { redirect, notFound } from "next/navigation"
 import { db } from "@/lib/db"
-import { users } from "@/lib/db/schema"
+import { users, procesos } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { ProcesoDetail } from "@/components/procesos/proceso-detail"
 import { AnalyzeButton } from "@/components/analysis/analyze-button"
+import { AnalysisTracker } from "@/components/analysis/analysis-tracker"
 import { ChevronLeftIcon } from "lucide-react"
 import Link from "next/link"
 
@@ -13,22 +14,15 @@ export const dynamic = "force-dynamic"
 
 interface PageProps {
   params: { id: string }
+  searchParams: { analysis?: string }
 }
 
 async function getProceso(id: string) {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
-  const res = await fetch(`${baseUrl}/api/procesos/${id}`, {
-    cache: "no-store",
-  })
-
-  if (res.status === 404) return null
-  if (res.status === 401) throw new Error("unauthorized")
-  if (!res.ok) throw new Error("Error al cargar proceso")
-
-  return res.json()
+  const row = db.select().from(procesos).where(eq(procesos.id, id)).get()
+  return row ?? null
 }
 
-export default async function ProcesoDetailPage({ params }: PageProps) {
+export default async function ProcesoDetailPage({ params, searchParams }: PageProps) {
   const session = await auth()
   if (!session?.user) redirect("/login")
 
@@ -84,7 +78,16 @@ export default async function ProcesoDetailPage({ params }: PageProps) {
           {fetchError}
         </div>
       ) : (
-        <ProcesoDetail proceso={proceso as any} />
+        <>
+          <ProcesoDetail proceso={proceso as any} />
+          {searchParams?.analysis && (
+            <AnalysisTracker
+              key={searchParams.analysis}
+              analysisId={searchParams.analysis}
+              procesoId={params.id}
+            />
+          )}
+        </>
       )}
     </div>
   )
