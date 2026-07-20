@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { auth, canUseFeature } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -25,8 +26,17 @@ export async function GET() {
 
   const state = crypto.randomUUID();
   const authUrl = getAuthUrl(state);
+  const cookiePrefix = process.env.NODE_ENV === "production" ? "__Secure-" : "";
 
-  return NextResponse.json(authUrl);
+  const response = NextResponse.json({ url: authUrl.url });
+  response.cookies.set(`${cookiePrefix}linkedin-oauth-state`, state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 600,
+  });
+  return response;
 }
 
 export async function POST(request: NextRequest) {
@@ -47,9 +57,16 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { code } = body;
+    const { code, state: bodyState } = body;
     if (!code || typeof code !== "string") {
       return NextResponse.json({ error: "Codigo de autorizacion requerido" }, { status: 400 });
+    }
+
+    // CSRF: validate LinkedIn OAuth state against cookie
+    const cookiePrefix = process.env.NODE_ENV === "production" ? "__Secure-" : "";
+    const cookieState = request.cookies.get(`${cookiePrefix}linkedin-oauth-state`)?.value;
+    if (!cookieState || !bodyState || cookieState !== bodyState) {
+      return NextResponse.json({ error: "Estado inválido" }, { status: 400 });
     }
 
     const tokenData = await exchangeCodeForToken(code);
