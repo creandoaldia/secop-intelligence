@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, canUseFeature } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { senaProfiles } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
@@ -19,6 +19,10 @@ export async function DELETE(
   const session = await auth();
   if (!session?.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  if (!canUseFeature(session.user.plan ?? "free", "sena_ilimitado")) {
+    return NextResponse.json({ error: "Plan no autorizado" }, { status: 403 });
+  }
 
   const rl = rateLimitMiddleware(`sena-delete:${session.user.id}`, { maxRequests: 20, windowMs: 60_000 });
   if (!rl.allowed) {

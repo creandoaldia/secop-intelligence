@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, canUseFeature } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { alertas } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -22,6 +22,10 @@ export async function GET() {
   const session = await auth();
   if (!session?.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  if (!canUseFeature(session.user.plan ?? "free", "alertas")) {
+    return NextResponse.json({ error: "Plan no autorizado" }, { status: 403 });
+  }
 
   // Rate limit: 30 requests/min per user for alertas
   const rl = rateLimitMiddleware(`alertas-list:${session.user.id}`, { maxRequests: 30, windowMs: 60_000 });
@@ -53,6 +57,10 @@ export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  if (!canUseFeature(session.user.plan ?? "free", "alertas")) {
+    return NextResponse.json({ error: "Plan no autorizado" }, { status: 403 });
+  }
 
   // Rate limit: 20 alertas created/hour per user
   const rl = rateLimitMiddleware(`alertas-create:${session.user.id}`, { maxRequests: 20, windowMs: 3600_000 });

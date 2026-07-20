@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, canUseFeature } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -20,6 +20,10 @@ export async function GET(request: NextRequest) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("callbackUrl", request.url);
     return NextResponse.redirect(loginUrl);
+  }
+
+  if (!canUseFeature(session.user.plan ?? "free", "linkedin")) {
+    return NextResponse.json({ error: "Plan no autorizado" }, { status: 403 });
   }
 
   const rl = rateLimitMiddleware(`linkedin-callback:${session.user.id}`, {

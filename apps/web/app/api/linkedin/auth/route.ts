@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { auth, canUseFeature } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -13,6 +13,10 @@ export async function GET() {
   const session = await auth();
   if (!session?.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  if (!canUseFeature(session.user.plan ?? "free", "linkedin")) {
+    return NextResponse.json({ error: "Plan no autorizado" }, { status: 403 });
+  }
 
   const rl = rateLimitMiddleware(`linkedin-auth:${session.user.id}`, { maxRequests: 10, windowMs: 60_000 });
   if (!rl.allowed) {
@@ -29,6 +33,10 @@ export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  if (!canUseFeature(session.user.plan ?? "free", "linkedin")) {
+    return NextResponse.json({ error: "Plan no autorizado" }, { status: 403 });
+  }
 
   const rl = rateLimitMiddleware(`linkedin-token:${session.user.id}`, { maxRequests: 5, windowMs: 3600_000 });
   if (!rl.allowed) {
