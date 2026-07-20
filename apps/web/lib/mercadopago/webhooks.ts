@@ -165,6 +165,17 @@ async function handleSubscriptionEvent(
     .where(eq(subscriptions.id, sub.id))
     .run();
 
+  // Upgrade user plan on subscription_authorized or preapproval
+  if (
+    _rawEvent.type === "subscription_authorized" ||
+    _rawEvent.type === "preapproval"
+  ) {
+    await db.update(users)
+      .set({ plan: sub.plan })
+      .where(eq(users.id, sub.userId))
+      .run();
+  }
+
   // Reset user pages
   await db.update(users)
     .set({ pagesUsed: 0, pagesResetAt: now })
