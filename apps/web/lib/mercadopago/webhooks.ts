@@ -4,6 +4,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import crypto from "crypto";
+import { WebhookSignatureValidator, InvalidWebhookSignatureError } from "mercadopago";
 import { db } from "@/lib/db";
 import { mpWebhookEvents, subscriptions, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -33,42 +34,30 @@ function notConfiguredError(): never {
 // ─── Signature Verification ────────────────────────────────
 
 /**
- * Verify MercadoPago X-Signature header.
- * MP signs using HMAC-SHA256 of the request body.
- * The header format is: `ts=<timestamp>,v1=<signature>`
+ * Validate MercadoPago X-Signature header using the official SDK.
+ * MP template: "id:<dataId>;request-id:<xRequestId>;ts:<ts>;"
  */
-export function verifySignature(
-  xSignatureHeader: string | null,
-  body: string
+export function validateWebhookSignature(
+  xSignature: string,
+  xRequestId: string,
+  dataId: string
 ): boolean {
   if (!MP_WEBHOOK_SECRET) return false;
-
-  if (!xSignatureHeader) return false;
-
-  // Parse "ts=1234567890,v1=abcdef123456..."
-  const parts = xSignatureHeader.split(",");
-  let ts = "";
-  let signature = "";
-
-  for (const part of parts) {
-    const [key, value] = part.split("=");
-    if (key === "ts") ts = value;
-    if (key === "v1") signature = value;
+  try {
+    WebhookSignatureValidator.validate({
+      xSignature,
+      xRequestId,
+      dataId,
+      secret: MP_WEBHOOK_SECRET,
+      toleranceSeconds: 300,
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof InvalidWebhookSignatureError) {
+      return false;
+    }
+    throw error;
   }
-
-  if (!ts || !signature) return false;
-
-  // MP template: "id:<id>;request-id:<req-id>;ts:<ts>;"
-  // But for webhook events, we use simpler: body + ts
-  const dataToSign = `${body}${ts}`;
-  const computed = crypto
-    .createHmac("sha256", MP_WEBHOOK_SECRET)
-    .update(dataToSign)
-    .digest("hex");
-
-  // Constant-time comparison
-  if (computed.length !== signature.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(signature));
 }
 
 // ─── Event Processing ──────────────────────────────────────
@@ -82,7 +71,7 @@ const subscriptionEventSchema = z.object({
 export async function processWebhookEvent(
   rawEvent: MercadoPagoEvent
 ): Promise<{ handled: boolean; action: string }> {
-  const eventId = rawEvent.id as string || `${rawEvent.type}_${rawEvent.data?.id}_${Date.now()}`;
+  const eventId = rawEvent.id as string || `${rawEvent.type}_${rawEvent.data?.id}_${rawEvent.action}`;
 
   // Dedup: check if already processed
   const existing = await db

@@ -1,87 +1,130 @@
 // ─────────────────────────────────────────────────────────────
 // Tests: MercadoPago Webhook Signature Verification
-// Pure function — only needs crypto
+// Uses the official SDK WebhookSignatureValidator
+// Template format: id:<dataId>;request-id:<xRequestId>;ts:<ts>;
 // ─────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeAll, vi } from "vitest";
+import crypto from "crypto";
 
-describe("verifySignature", () => {
+const SECRET = "test_webhook_secret_123";
+const DATA_ID = "123";
+const REQ_ID = "abc-123";
+
+/**
+ * Build a valid X-Signature header value using the MP template.
+ */
+function buildValidSignature(
+  dataId: string,
+  requestId: string,
+  ts: string
+): string {
+  const template = `id:${dataId};request-id:${requestId};ts:${ts};`;
+  const hash = crypto
+    .createHmac("sha256", SECRET)
+    .update(template)
+    .digest("hex");
+  return `ts=${ts},v1=${hash}`;
+}
+
+describe("validateWebhookSignature", () => {
   beforeAll(() => {
-    process.env.MP_WEBHOOK_SECRET = "test_webhook_secret_123";
+    process.env.MP_WEBHOOK_SECRET = SECRET;
   });
 
   it("verifica firma valida correctamente", async () => {
-    // Re-import module to pick up env var set in beforeAll
     vi.resetModules();
-    const { verifySignature } = await import("@/lib/mercadopago/webhooks");
+    const { validateWebhookSignature } = await import(
+      "@/lib/mercadopago/webhooks"
+    );
 
-    const body = '{"type":"payment","data":{"id":"123"}}';
-    const ts = "1712345678";
-    const crypto = require("crypto");
-    const expectedSig = crypto
-      .createHmac("sha256", "test_webhook_secret_123")
-      .update(body + ts)
-      .digest("hex");
+    // Note: MercadoPago SDK compares ts against Date.now() (ms),
+    // so we use milliseconds here, not seconds.
+    const ts = Date.now().toString();
+    const xSignature = buildValidSignature(DATA_ID, REQ_ID, ts);
 
-    const header = `ts=${ts},v1=${expectedSig}`;
-    expect(verifySignature(header, body)).toBe(true);
+    expect(validateWebhookSignature(xSignature, REQ_ID, DATA_ID)).toBe(true);
   });
 
-  it("rechaza firma invalida", async () => {
+  it("rechaza cuando x-request-id no coincide con la firma", async () => {
     vi.resetModules();
-    const { verifySignature } = await import("@/lib/mercadopago/webhooks");
+    const { validateWebhookSignature } = await import(
+      "@/lib/mercadopago/webhooks"
+    );
 
-    const body = '{"type":"payment","data":{"id":"123"}}';
-    const header = "ts=1712345678,v1=signature_invalida";
-    expect(verifySignature(header, body)).toBe(false);
+    const ts = Date.now().toString();
+    // Build signature for REQ_ID but validate with a different request ID
+    const xSignature = buildValidSignature(DATA_ID, REQ_ID, ts);
+
+    expect(
+      validateWebhookSignature(xSignature, "different-req-id", DATA_ID)
+    ).toBe(false);
   });
 
-  it("rechaza cuando falta ts", async () => {
+  it("rechaza cuando data.id esta vacio", async () => {
     vi.resetModules();
-    const { verifySignature } = await import("@/lib/mercadopago/webhooks");
-    expect(verifySignature("v1=signature", "{}")).toBe(false);
+    const { validateWebhookSignature } = await import(
+      "@/lib/mercadopago/webhooks"
+    );
+
+    expect(validateWebhookSignature("ts=1,v1=abc", REQ_ID, "")).toBe(false);
   });
 
-  it("rechaza cuando falta v1", async () => {
+  it("rechaza cuando x-signature esta vacio (ausente)", async () => {
     vi.resetModules();
-    const { verifySignature } = await import("@/lib/mercadopago/webhooks");
-    expect(verifySignature("ts=1712345678", "{}")).toBe(false);
+    const { validateWebhookSignature } = await import(
+      "@/lib/mercadopago/webhooks"
+    );
+
+    expect(validateWebhookSignature("", REQ_ID, DATA_ID)).toBe(false);
   });
 
-  it("rechaza cuando no hay header", async () => {
+  it("rechaza x-signature malformado", async () => {
     vi.resetModules();
-    const { verifySignature } = await import("@/lib/mercadopago/webhooks");
-    expect(verifySignature(null, "{}")).toBe(false);
+    const { validateWebhookSignature } = await import(
+      "@/lib/mercadopago/webhooks"
+    );
+
+    expect(
+      validateWebhookSignature("formato-incorrecto-sin-ts", REQ_ID, DATA_ID)
+    ).toBe(false);
   });
 
-  it("rechaza header con formato incorrecto", async () => {
+  it("rechaza firma invalida (hash incorrecto)", async () => {
     vi.resetModules();
-    const { verifySignature } = await import("@/lib/mercadopago/webhooks");
-    expect(verifySignature("formato-incorrecto-sin-ts", "{}")).toBe(false);
+    const { validateWebhookSignature } = await import(
+      "@/lib/mercadopago/webhooks"
+    );
+
+    const ts = Date.now().toString();
+    const xSignature = `ts=${ts},v1=hash_incorrecto`;
+
+    expect(validateWebhookSignature(xSignature, REQ_ID, DATA_ID)).toBe(false);
   });
 
-  it("usa constant-time comparison (timingSafeEqual)", async () => {
+  it("rechaza timestamp fuera de tolerancia (300s)", async () => {
     vi.resetModules();
-    const { verifySignature } = await import("@/lib/mercadopago/webhooks");
+    const { validateWebhookSignature } = await import(
+      "@/lib/mercadopago/webhooks"
+    );
 
-    const body = "{}";
-    const ts = "1712345678";
-    const crypto = require("crypto");
-    const expectedSig = crypto
-      .createHmac("sha256", "test_webhook_secret_123")
-      .update(body + ts)
-      .digest("hex");
+    const oldTs = (Date.now() - 600_000).toString(); // 10 min ago
+    const xSignature = buildValidSignature(DATA_ID, REQ_ID, oldTs);
 
-    const header = `ts=${ts},v1=${expectedSig}extra`;
-    expect(verifySignature(header, body)).toBe(false);
+    expect(validateWebhookSignature(xSignature, REQ_ID, DATA_ID)).toBe(false);
   });
 
   it("falla si MP_WEBHOOK_SECRET no esta configurado", async () => {
     delete process.env.MP_WEBHOOK_SECRET;
     vi.resetModules();
-    const { verifySignature } = await import("@/lib/mercadopago/webhooks");
-    expect(verifySignature("ts=1,v1=abc", "{}")).toBe(false);
+    const { validateWebhookSignature } = await import(
+      "@/lib/mercadopago/webhooks"
+    );
 
-    process.env.MP_WEBHOOK_SECRET = "test_webhook_secret_123";
+    expect(validateWebhookSignature("ts=1,v1=abc", REQ_ID, DATA_ID)).toBe(
+      false
+    );
+
+    process.env.MP_WEBHOOK_SECRET = SECRET;
   });
 });

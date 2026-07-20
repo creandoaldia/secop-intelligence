@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifySignature, processWebhookEvent, isWebhookConfigured } from "@/lib/mercadopago/webhooks";
+import { validateWebhookSignature, processWebhookEvent, isWebhookConfigured } from "@/lib/mercadopago/webhooks";
 
 export async function POST(request: NextRequest) {
   // If not configured, return 501 to tell MP to stop retrying
@@ -17,11 +17,25 @@ export async function POST(request: NextRequest) {
 
   try {
     const rawBody = await request.text();
+
+    // Parse JSON body FIRST
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON body" },
+        { status: 400 }
+      );
+    }
+
     const xSignature = request.headers.get("x-signature");
 
-    // Verify signature if present
+    // Verify signature if present — using SDK validator
     if (xSignature) {
-      const isValid = verifySignature(xSignature, rawBody);
+      const xRequestId = request.headers.get("x-request-id") ?? "";
+      const dataId = (event.data as { id?: string })?.id ?? "";
+      const isValid = validateWebhookSignature(xSignature, xRequestId, dataId);
       if (!isValid) {
         return NextResponse.json(
           { error: "Invalid signature" },
@@ -37,17 +51,6 @@ export async function POST(request: NextRequest) {
         );
       }
       console.warn("[MP Webhook] No X-Signature header — dev mode, accepting");
-    }
-
-    // Parse JSON body
-    let event: Record<string, unknown>;
-    try {
-      event = JSON.parse(rawBody);
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid JSON body" },
-        { status: 400 }
-      );
     }
 
     const result = await processWebhookEvent(event);
