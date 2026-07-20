@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "./sidebar";
+import { FreshnessBadge } from "@/components/freshness-badge";
 
 interface HeaderProps {
   user: {
@@ -30,6 +31,8 @@ interface HeaderProps {
     plan?: string | null;
     image?: string | null;
   };
+  lastSuccessAt?: Date | number | null;
+  sourceStatus?: string | null;
 }
 
 const planBadge: Record<string, string> = {
@@ -40,7 +43,7 @@ const planBadge: Record<string, string> = {
     "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300",
 };
 
-export function Header({ user }: HeaderProps) {
+export function Header({ user, lastSuccessAt, sourceStatus }: HeaderProps) {
   const initial = (user.name?.[0] ?? user.email?.[0] ?? "U").toUpperCase();
   const badgeClass = planBadge[user.plan ?? "free"] ?? planBadge.free;
 
@@ -76,6 +79,16 @@ export function Header({ user }: HeaderProps) {
 
       {/* Title */}
       <div className="flex-1" />
+
+      {/* Freshness indicator — desktop only, only when timestamp available */}
+      {lastSuccessAt != null && (
+        <div className="hidden sm:flex items-center mr-2">
+          <FreshnessBadge
+            timestamp={lastSuccessAt}
+            status={sourceStatus as "healthy" | "degraded" | "down" | undefined}
+          />
+        </div>
+      )}
 
       {/* User dropdown */}
       <DropdownMenu>

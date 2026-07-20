@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/card"
 import { ExternalLinkIcon } from "lucide-react"
 import { Timeline } from "@/components/procesos/timeline"
+import { FreshnessBadge } from "@/components/freshness-badge"
 
 const formatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -69,7 +70,7 @@ function DetailRow({
   )
 }
 
-export function ProcesoDetail({ proceso }: { proceso: Proceso }) {
+export function ProcesoDetail({ proceso, lastSuccessAt }: { proceso: Proceso; lastSuccessAt?: Date | number | null }) {
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
@@ -108,6 +109,10 @@ export function ProcesoDetail({ proceso }: { proceso: Proceso }) {
             <DetailRow
               label="Fuente"
               value={proceso.fuente ?? "No especificado"}
+            />
+            <DetailRow
+              label="Última sincronización de datos"
+              value={<FreshnessBadge timestamp={lastSuccessAt ?? null} />}
             />
           </CardContent>
         </Card>

@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth"
 import { canUseFeature, hasPagesRemaining } from "@/lib/auth"
 import { redirect, notFound } from "next/navigation"
 import { db } from "@/lib/db"
-import { users, procesos } from "@/lib/db/schema"
+import { users, procesos, sourceHealth } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { ProcesoDetail } from "@/components/procesos/proceso-detail"
 import { AnalyzeButton } from "@/components/analysis/analyze-button"
@@ -18,8 +18,14 @@ interface PageProps {
 }
 
 async function getProceso(id: string) {
-  const row = db.select().from(procesos).where(eq(procesos.id, id)).get()
-  return row ?? null
+  const row = db
+    .select()
+    .from(procesos)
+    .leftJoin(sourceHealth, eq(sourceHealth.source, "socrata"))
+    .where(eq(procesos.id, id))
+    .get()
+  if (!row) return null
+  return { ...row.procesos, lastSuccessAt: row.source_health?.lastSuccessAt ?? null }
 }
 
 export default async function ProcesoDetailPage({ params, searchParams }: PageProps) {
@@ -79,7 +85,7 @@ export default async function ProcesoDetailPage({ params, searchParams }: PagePr
         </div>
       ) : (
         <>
-          <ProcesoDetail proceso={proceso as any} />
+          <ProcesoDetail proceso={proceso as any} lastSuccessAt={(proceso as any).lastSuccessAt} />
           {searchParams?.analysis && (
             <AnalysisTracker
               key={searchParams.analysis}
