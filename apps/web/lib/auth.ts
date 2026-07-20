@@ -78,6 +78,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.pagesUsed = (user as any).pagesUsed;
         token.planExpiresAt = (user as any).planExpiresAt;
       }
+      // Re-read plan from DB on token refresh so webhook upgrades/downgrades
+      // are reflected before JWT expiry (30d default)
+      if (!user && token.sub) {
+        const dbUser = await db.select().from(users).where(eq(users.id, token.sub)).get();
+        if (dbUser) token.plan = dbUser.plan;
+      }
       return token;
     },
     async session({ session, token }) {
@@ -95,27 +101,5 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 });
 
 // ─── AUTH HELPERS ───────────────────────────────────────────
-
-// Check if user has access to a feature based on plan
-export function canUseFeature(
-  userPlan: string,
-  feature: "analisis" | "linkedin" | "sena_ilimitado" | "exportar"
-): boolean {
-  const featureAccess: Record<string, string[]> = {
-    analisis: ["basic", "pro", "premium"],
-    linkedin: ["pro", "premium"],
-    sena_ilimitado: ["pro", "premium"],
-    exportar: ["basic", "pro", "premium"],
-  };
-  return featureAccess[feature]?.includes(userPlan) ?? false;
-}
-
-// Check if user has enough pages
-export function hasPagesRemaining(
-  pagesUsed: number,
-  userPlan: string,
-  pagesNeeded: number = 1
-): boolean {
-  const limit = PLAN_PAGES[userPlan] ?? 0;
-  return (pagesUsed + pagesNeeded) <= limit;
-}
+// Re-exported from features.ts as single source of truth
+export { canUseFeature, hasPagesRemaining } from './features'
