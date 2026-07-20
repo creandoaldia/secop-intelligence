@@ -45,7 +45,14 @@ export default async function ProcesosPage({ searchParams }: PageProps) {
   const session = await auth()
   if (!session?.user) redirect("/login")
 
-  let data: { data: unknown[]; total: number; page: number; pageSize: number; pages: number }
+  let data: {
+    data: unknown[];
+    total: number;
+    page: number;
+    pageSize: number;
+    pages: number;
+    ultima_sincronizacion: string | null;
+  }
   try {
     data = await getProcesos(searchParams)
   } catch {
@@ -87,6 +94,9 @@ export default async function ProcesosPage({ searchParams }: PageProps) {
           pages={data.pages}
           sortBy={String(searchParams.sortBy || "fechaPublicacion")}
           sortOrder={String(searchParams.sortOrder || "desc")}
+          lastSuccessAt={data.ultima_sincronizacion
+            ? new Date(data.ultima_sincronizacion).getTime() / 1000
+            : null}
         />
       </Suspense>
     </div>

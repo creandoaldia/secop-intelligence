@@ -12,6 +12,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
+import { FreshnessBadge } from "@/components/freshness-badge"
 
 const formatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -36,6 +37,7 @@ interface ProcesosTableProps {
   pages: number
   sortBy: string
   sortOrder: string
+  lastSuccessAt?: number | null
 }
 
 const estadoVariant: Record<string, "default" | "secondary" | "outline"> = {
@@ -54,7 +56,7 @@ function formatCOP(valor: number | null): string {
 }
 
 function formatDate(ts: number | null): string {
-  if (!ts) return "—"
+  if (ts == null) return "—"
   return new Date(ts * 1000).toLocaleDateString("es-CO", {
     year: "numeric",
     month: "short",
@@ -75,6 +77,7 @@ export function ProcesosTable({
   pages,
   sortBy,
   sortOrder,
+  lastSuccessAt,
 }: ProcesosTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -112,6 +115,7 @@ export function ProcesosTable({
 
   return (
     <div className="space-y-4">
+      <FreshnessBadge label="Datos sincronizados:" timestamp={lastSuccessAt ?? null} />
       <Table>
         <TableHeader>
           <TableRow>
