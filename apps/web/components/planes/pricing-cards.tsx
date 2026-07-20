@@ -13,6 +13,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { CheckIcon } from "lucide-react";
+import { PLAN_PRICING } from "@/lib/mercadopago/types";
+
+const formatPrice = (price: number) =>
+  `$${price.toLocaleString("es-CO")}`;
 
 interface Plan {
   id: string;
@@ -34,16 +38,15 @@ const plans: Plan[] = [
     features: [
       "10 paginas de pliegos/mes",
       "Busqueda de procesos SECOP",
-      "Alertas basicas",
       "Dashboard basico",
     ],
   },
   {
     id: "basic",
     name: "Basic",
-    price: "$49.000",
+    price: formatPrice(PLAN_PRICING.basic.price),
     priceSubtext: "/mes",
-    pages: 600,
+    pages: PLAN_PRICING.basic.pagesPerMonth,
     features: [
       "600 paginas de pliegos/mes",
       "Analisis IA de pliegos",
@@ -55,9 +58,9 @@ const plans: Plan[] = [
   {
     id: "pro",
     name: "Pro",
-    price: "$149.000",
+    price: formatPrice(PLAN_PRICING.pro.price),
     priceSubtext: "/mes",
-    pages: 3000,
+    pages: PLAN_PRICING.pro.pagesPerMonth,
     features: [
       "3000 paginas de pliegos/mes",
       "Analisis IA completo",
@@ -69,9 +72,9 @@ const plans: Plan[] = [
   {
     id: "premium",
     name: "Premium",
-    price: "$399.000",
+    price: formatPrice(PLAN_PRICING.premium.price),
     priceSubtext: "/mes",
-    pages: 10000,
+    pages: PLAN_PRICING.premium.pagesPerMonth,
     features: [
       "10.000 paginas de pliegos/mes",
       "Todo lo de Pro",

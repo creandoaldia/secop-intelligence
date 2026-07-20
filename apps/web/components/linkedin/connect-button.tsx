@@ -15,12 +15,15 @@ import {
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
 import { Link2Icon, Link2OffIcon } from "lucide-react";
+import { canUseFeature } from "@/lib/features";
 
 interface ConnectButtonProps {
   isConnected: boolean;
+  plan?: string;
 }
 
-export function ConnectButton({ isConnected }: ConnectButtonProps) {
+export function ConnectButton({ isConnected, plan }: ConnectButtonProps) {
+  const canConnect = canUseFeature(plan ?? "free", "linkedin");
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false);
@@ -105,6 +108,9 @@ export function ConnectButton({ isConnected }: ConnectButtonProps) {
       </AlertDialog>
     );
   }
+
+  // Gate: hide connect CTA for users without LinkedIn feature
+  if (!canConnect) return null;
 
   return (
     <Button

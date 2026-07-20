@@ -58,7 +58,7 @@ export default async function PerfilPage() {
 
         <div className="space-y-4">
           <ConnectedStatus profileId={user.linkedinProfileId} />
-          <ConnectButton isConnected={isLinkedInConnected} />
+          <ConnectButton isConnected={isLinkedInConnected} plan={user.plan} />
         </div>
       </div>
     </div>
