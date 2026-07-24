@@ -15,6 +15,7 @@ const ACCESS_MATRIX: Record<string, string[]> = {
   sena_ilimitado: ["pro", "premium"],
   exportar: ["basic", "pro", "premium"],
   alertas: ["basic", "pro", "premium"],
+  pricing_history: ["free", "basic", "pro", "premium"],
 };
 
 describe("canUseFeature — plan gating access matrix", () => {

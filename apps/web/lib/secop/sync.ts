@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { procesos, syncLog, entidades, sourceHealth } from "@/lib/db/schema";
 import { eq, sql, and, inArray } from "drizzle-orm";
+import { capturePricingSnapshots } from "@/lib/pricing-history";
 import { SocrataClient } from "./client";
 import {
   mapSocrataRowToProceso,
@@ -181,6 +182,7 @@ export async function runSync(
       // Separate new, changed, unchanged
       const toInsert: SocrataProcessRow[] = [];
       const toUpdate: Array<{ row: SocrataProcessRow; version: number }> = [];
+      const touchedIds: string[] = [];
       let newIdsInPage = 0;
 
       for (const row of rows) {
@@ -190,11 +192,13 @@ export async function runSync(
         const existing = existingMap.get(id);
         if (!existing) {
           toInsert.push(row);
+          touchedIds.push(id);
           newIdsInPage++;
         } else {
           const newHash = computeHash(row);
           if (newHash !== existing.hash) {
             toUpdate.push({ row, version: existing.version ?? 1 });
+            touchedIds.push(id);
             newIdsInPage++;
           }
         }
@@ -255,6 +259,11 @@ export async function runSync(
             })
             .run();
         }
+      }
+
+      // Capture pricing snapshots for touched procesos
+      if (touchedIds.length > 0) {
+        await capturePricingSnapshots(touchedIds, syncId);
       }
 
       // Track metrics

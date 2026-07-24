@@ -305,6 +305,17 @@ export const mpWebhookEvents = sqliteTable("mp_webhook_events", {
     .default(sql`(strftime('%s','now'))`),
 });
 
+// ─── PRICING HISTORY ─────────────────────────────────────────
+
+export const procesoPricingHistory = sqliteTable("proceso_pricing_history", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  procesoId: text("proceso_id").notNull().references(() => procesos.id, { onDelete: "cascade" }),
+  valor: integer("valor").notNull(),
+  observedAt: integer("observed_at", { mode: "timestamp" }).notNull(),
+  source: text("source"),
+  syncLogId: integer("sync_log_id").references(() => syncLog.id),
+});
+
 // ─── FTS5 VIRTUAL TABLES ────────────────────────────────────
 
 // Indices recomendados (crear en migration aparte):

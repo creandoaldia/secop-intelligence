@@ -8,6 +8,7 @@ import {
 import { ExternalLinkIcon } from "lucide-react"
 import { Timeline } from "@/components/procesos/timeline"
 import { FreshnessBadge } from "@/components/freshness-badge"
+import { PricingHistoryChart, type ChartPoint } from "./pricing-history-chart"
 
 const formatter = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -70,7 +71,17 @@ function DetailRow({
   )
 }
 
-export function ProcesoDetail({ proceso, lastSuccessAt }: { proceso: Proceso; lastSuccessAt?: Date | number | null }) {
+export function ProcesoDetail({
+  proceso,
+  lastSuccessAt,
+  pricingHistory,
+  pricingError,
+}: {
+  proceso: Proceso
+  lastSuccessAt?: Date | number | null
+  pricingHistory?: ChartPoint[]
+  pricingError?: string | null
+}) {
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
@@ -163,6 +174,10 @@ export function ProcesoDetail({ proceso, lastSuccessAt }: { proceso: Proceso; la
               )}
             </CardContent>
           </Card>
+        )}
+
+        {pricingHistory !== undefined && (
+          <PricingHistoryChart data={pricingHistory} error={pricingError} />
         )}
       </div>
 

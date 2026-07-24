@@ -9,6 +9,8 @@ import { AnalyzeButton } from "@/components/analysis/analyze-button"
 import { AnalysisTracker } from "@/components/analysis/analysis-tracker"
 import { ChevronLeftIcon } from "lucide-react"
 import Link from "next/link"
+import { getProcesoPricingHistory } from "@/lib/pricing-history"
+import type { ChartPoint } from "@/components/procesos/pricing-history-chart"
 
 export const dynamic = "force-dynamic"
 
@@ -44,6 +46,21 @@ export default async function ProcesoDetailPage({ params, searchParams }: PagePr
   }
 
   if (!proceso && !fetchError) notFound()
+
+  // Pricing history (isolated — query failure won't block the detail page)
+  let pricingHistory: ChartPoint[] = [];
+  let pricingError: string | null = null;
+  if (!fetchError && proceso) {
+    try {
+      const raw = await getProcesoPricingHistory(params.id);
+      pricingHistory = raw.map((p) => ({
+        observedAt: p.observedAt.toISOString(),
+        valor: p.valor,
+      }));
+    } catch (e) {
+      pricingError = "Error al cargar historial de precios";
+    }
+  }
 
   const canAnalyze = canUseFeature(session.user.plan ?? "free", "analisis");
   const user = !canAnalyze ? null : await db
@@ -85,7 +102,12 @@ export default async function ProcesoDetailPage({ params, searchParams }: PagePr
         </div>
       ) : (
         <>
-          <ProcesoDetail proceso={proceso as any} lastSuccessAt={(proceso as any).lastSuccessAt} />
+          <ProcesoDetail
+            proceso={proceso as any}
+            lastSuccessAt={(proceso as any).lastSuccessAt}
+            pricingHistory={pricingHistory}
+            pricingError={pricingError}
+          />
           {searchParams?.analysis && (
             <AnalysisTracker
               key={searchParams.analysis}

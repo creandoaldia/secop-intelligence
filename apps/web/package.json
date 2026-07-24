@@ -9,7 +9,9 @@
     "lint": "next lint",
     "db:check": "drizzle-kit check",
     "db:push": "drizzle-kit push",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "pricing-history:backfill": "node scripts/backfill-pricing-history.mjs",
+    "pricing-history:cleanup": "node scripts/cleanup-pricing-history.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
